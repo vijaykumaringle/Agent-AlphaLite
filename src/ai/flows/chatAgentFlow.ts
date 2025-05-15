@@ -36,7 +36,7 @@ const AttachedFileSchema = z.object({
 const ChatAgentInputSchema = z.object({
   message: z.string().describe('The latest message from the user.'),
   history: z.array(ChatMessageSchema).optional().describe('The conversation history up to this point.'),
-  files: z.array(AttachedFileSchema).optional().describe('An array of files attached by the user, if any.'),
+  files: z.array(AttachedFileSchema).optional().describe('An array of files attached by the user, if any. Currently, file attachments are disabled in the UI, so this will likely be empty or undefined.'),
 });
 export type ChatAgentInput = z.infer<typeof ChatAgentInputSchema>;
 
@@ -66,7 +66,7 @@ Conversation History (most recent last):
 {{/if}}
 
 {{#if files.length}}
-The user attached the following files:
+The user attached the following files (Note: File attachment is currently disabled in the UI, but handling logic is present):
 {{#each files}}
 File ({{@indexPlus1}}/{{../files.length}}): "{{this.fileName}}"
   {{#if this.fileDataUri}}
@@ -103,11 +103,10 @@ const internalChatAgentFlow = ai.defineFlow(
     outputSchema: ChatAgentOutputSchema,
   },
   async (input) => {
-    // Helpers are now registered at the module level, no need to register them here.
-    
     const { output } = await chatAgentPrompt(input);
-    if (!output) {
-      return { reply: "I'm sorry, I couldn't generate a response. The AI model did not return the expected output." };
+    if (!output || typeof output.reply !== 'string') {
+      console.error("AI model did not return the expected output structure for chatAgentFlow. Output:", JSON.stringify(output));
+      return { reply: "I'm sorry, I couldn't generate a response at this moment. The AI model's output was not in the expected format." };
     }
     return output;
   }

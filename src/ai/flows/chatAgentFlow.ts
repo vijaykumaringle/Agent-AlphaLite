@@ -70,20 +70,16 @@ const chatAgentPrompt = ai.definePrompt({
   name: 'chatAgentPrompt',
   input: {schema: ChatAgentPromptDataSchema}, // Uses the transformed data schema
   output: {schema: ChatAgentOutputSchema},
-  prompt: `You are a helpful assistant for StockPilot, an inventory management application.
-The user's latest message is: "{{message}}".
+  prompt: `You are a helpful and conversational assistant for StockPilot, an inventory management application.
+Your primary goal is to understand the user's needs based on their current message, the ongoing conversation history, and any files they've attached.
+Strive to provide a single, comprehensive, and coherent response after processing all available details.
 
-{{#if history}}
-Conversation History (most recent last):
-{{#each history}}
-{{#if isUser}}User{{else}}Agent{{/if}}: {{text}}
-{{/each}}
-{{/if}}
+The user's latest message is: "{{message}}".
 
 {{#if files.length}}
 The user attached the following files. Analyze their content to help respond to the user's message:
 {{#each files}}
-File ({{displayIndex}}/{{../files.length}}): "{{this.fileName}}"
+File ({{this.displayIndex}}/{{../files.length}}): "{{this.fileName}}"
   {{#if this.fileDataUri}}
     This file is an IMAGE: {{media url=this.fileDataUri}}. Describe or analyze it if the user's query relates to an image.
   {{else if this.fileContent}}
@@ -104,7 +100,15 @@ File ({{displayIndex}}/{{../files.length}}): "{{this.fileName}}"
 {{/each}}
 {{/if}}
 
-Based on the message, history, and any attached file information, provide a helpful and concise response. Ensure your response synthesizes all relevant information from the user's message, the conversation history, and any provided files before replying.
+{{#if history}}
+Conversation History (oldest first, leading to the user's current message):
+{{#each history}}
+{{#if isUser}}User{{else}}Agent{{/if}}: {{text}}
+{{/each}}
+{{/if}}
+
+Based on the user's current message, the full conversation history, and a thorough analysis of any attached file information, provide a helpful and concise response.
+Ensure your response synthesizes all relevant information before replying. Maintain a natural conversational flow.
 
 Key tasks for StockPilot:
 - If the user asks to add stock or an order: Acknowledge it and inform them this feature will be available soon via chat.
@@ -147,6 +151,11 @@ const internalChatAgentFlow = ai.defineFlow(
     if (!output || typeof output.reply !== 'string') {
       console.error("AI model did not return the expected output structure for chatAgentFlow. Output:", JSON.stringify(output));
       return { reply: "I'm sorry, I couldn't generate a response at this moment. The AI model's output was not in the expected format." };
+    }
+    
+    if (output.reply.trim() === "") {
+      console.warn("AI model returned an empty reply for chatAgentFlow. Input was:", JSON.stringify(promptData));
+      return { reply: "I received your message, but I don't have a specific response right now. Could you try rephrasing or asking something else?" };
     }
     return output;
   }

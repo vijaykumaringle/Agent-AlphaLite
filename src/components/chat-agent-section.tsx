@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Paperclip, Send, User, Brain } from "lucide-react"; // XCircle removed
+import { Paperclip, Send, User, Brain, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
@@ -18,7 +18,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-// Badge and XCircle removed as file display is removed
+import { Badge } from "@/components/ui/badge";
 
 interface ChatAgentSectionProps {
   messages: ChatMessage[];
@@ -27,34 +27,33 @@ interface ChatAgentSectionProps {
   setIsProcessing: (isProcessing: boolean) => void;
 }
 
-// Interface for AttachedFileInfo can be kept for future re-enablement but is unused for now
-// interface AttachedFileInfo {
-//   id: string; 
-//   name: string;
-//   type: string;
-//   content?: string; 
-//   dataUri?: string; 
-// }
+interface AttachedFileInfo {
+  id: string; 
+  name: string;
+  type: string;
+  content?: string; 
+  dataUri?: string; 
+}
 
-// Constants related to files can be kept for future re-enablement
-// const SUPPORTED_FILE_TYPES = [
-//   'text/plain', 
-//   'text/csv', 
-//   'text/markdown',
-//   'image/png',
-//   'image/jpeg',
-//   'application/vnd.ms-excel', // .xls
-//   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' // .xlsx
-// ];
-// const SUPPORTED_FILE_EXTENSIONS = '.png,.jpg,.jpeg,.xls,.xlsx,.txt,.csv,.md';
-// const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const SUPPORTED_FILE_TYPES = [
+  'text/plain', 
+  'text/csv', 
+  'text/markdown',
+  'image/png',
+  'image/jpeg',
+  'application/vnd.ms-excel', // .xls
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' // .xlsx
+];
+const SUPPORTED_FILE_EXTENSIONS = '.png,.jpg,.jpeg,.xls,.xlsx,.txt,.csv,.md';
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const MAX_FILES_COUNT = 5;
 
 export function ChatAgentSection({ messages, setMessages, isProcessing, setIsProcessing }: ChatAgentSectionProps) {
   const [inputValue, setInputValue] = useState("");
-  // const [attachedFilesInfo, setAttachedFilesInfo] = useState<AttachedFileInfo[]>([]); // Disabled
+  const [attachedFilesInfo, setAttachedFilesInfo] = useState<AttachedFileInfo[]>([]);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null); // Keep ref for potential future use
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -72,22 +71,80 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
     }
   }, [isProcessing]);
 
-  // File handling functions are commented out or simplified
-  // const handleFileAttach = () => {
-  //   fileInputRef.current?.click();
-  // };
+  const handleFileAttach = () => {
+    fileInputRef.current?.click();
+  };
 
-  // const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-  //  // Logic removed as attachments are disabled
-  // };
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files) return;
 
-  // const removeAttachedFile = (fileIdToRemove: string) => {
-  //   // Logic removed
-  // };
+    if (attachedFilesInfo.length + files.length > MAX_FILES_COUNT) {
+        toast({
+            title: "Too many files",
+            description: `You can attach a maximum of ${MAX_FILES_COUNT} files.`,
+            variant: "destructive",
+        });
+        if (fileInputRef.current) fileInputRef.current.value = ""; // Clear selection
+        return;
+    }
+    
+    const newFilesInfo: AttachedFileInfo[] = [];
+    let unsupportedFiles = false;
+    let oversizedFiles = false;
+
+    for (const file of Array.from(files)) {
+        if (attachedFilesInfo.find(f => f.name === file.name && f.id.startsWith(file.lastModified.toString()))) {
+            toast({ title: "File Already Added", description: `"${file.name}" is already attached.`, variant: "default" });
+            continue;
+        }
+
+        if (!SUPPORTED_FILE_TYPES.includes(file.type) && !file.name.endsWith('.xls') && !file.name.endsWith('.xlsx') && !file.name.endsWith('.csv') && !file.name.endsWith('.txt') && !file.name.endsWith('.md')) {
+            unsupportedFiles = true;
+            continue;
+        }
+        if (file.size > MAX_FILE_SIZE) {
+            oversizedFiles = true;
+            continue;
+        }
+
+        const fileId = `${file.lastModified}-${file.name}-${Math.random().toString(36).substring(2,9)}`;
+        const fInfo: AttachedFileInfo = { id: fileId, name: file.name, type: file.type };
+
+        if (file.type.startsWith('image/')) {
+            fInfo.dataUri = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target?.result as string);
+                reader.readAsDataURL(file);
+            });
+        } else { // For text, csv, md, and attempt for Excel
+            fInfo.content = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target?.result as string);
+                reader.readAsText(file);
+            });
+        }
+        newFilesInfo.push(fInfo);
+    }
+    
+    setAttachedFilesInfo(prev => [...prev, ...newFilesInfo]);
+
+    if (unsupportedFiles) {
+        toast({ title: "Unsupported File Type", description: `Some files were not attached. Supported types: ${SUPPORTED_FILE_EXTENSIONS}`, variant: "destructive" });
+    }
+    if (oversizedFiles) {
+        toast({ title: "File Too Large", description: `Some files exceed the ${MAX_FILE_SIZE / (1024*1024)}MB size limit.`, variant: "destructive" });
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ""; // Clear selection
+  };
+
+  const removeAttachedFile = (fileIdToRemove: string) => {
+    setAttachedFilesInfo(prev => prev.filter(f => f.id !== fileIdToRemove));
+  };
 
   const handleSendMessage = async () => {
     const trimmedInput = inputValue.trim();
-    if (!trimmedInput) return; // Only send if there's text input
+    if (!trimmedInput && attachedFilesInfo.length === 0) return;
 
     const newUserMessage: ChatMessage = {
       id: Date.now().toString() + '-user',
@@ -99,18 +156,17 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
     setInputValue("");
     setIsProcessing(true);
 
-    // FilesPayload is no longer created or sent
-    // const filesPayload = attachedFilesInfo.map(fInfo => ({
-    //   fileName: fInfo.name,
-    //   fileContent: fInfo.content,
-    //   fileDataUri: fInfo.dataUri,
-    // }));
+    const filesPayload = attachedFilesInfo.map(fInfo => ({
+      fileName: fInfo.name,
+      fileContent: fInfo.content,
+      fileDataUri: fInfo.dataUri,
+    }));
 
     try {
       const result = await runChatAgentFlow({ 
         message: trimmedInput, 
         history: messages,
-        // files: filesPayload, // Files parameter removed
+        files: filesPayload.length > 0 ? filesPayload : undefined,
       });
 
       if ("error" in result) {
@@ -151,9 +207,9 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
         setMessages((prev) => [...prev, agentErrorMessage]);
     } finally {
       setIsProcessing(false);
-      // setAttachedFilesInfo([]); // No longer needed as it's empty
+      setAttachedFilesInfo([]); 
       if (fileInputRef.current) {
-        fileInputRef.current.value = ""; // Clear file input in case it was somehow used
+        fileInputRef.current.value = ""; 
       }
       inputRef.current?.focus();
     }
@@ -207,31 +263,44 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
         )}
       </ScrollArea>
       <div className="p-4 border-t bg-background rounded-b-lg">
-        {/* Attached files display removed */}
-        {/* {attachedFilesInfo.length > 0 && ( ... )} */}
+        {attachedFilesInfo.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {attachedFilesInfo.map((file) => (
+              <Badge key={file.id} variant="secondary" className="py-1 px-2 text-xs group relative">
+                {file.name} ({file.type}, {(file.dataUri ? (file.dataUri.length * 0.75 / 1024).toFixed(1) : (file.content ? (file.content.length / 1024).toFixed(1) : 0) )} KB)
+                <button
+                  onClick={() => removeAttachedFile(file.id)}
+                  className="ml-1.5 p-0.5 rounded-full hover:bg-destructive/20 text-destructive group-hover:text-destructive-foreground group-hover:bg-destructive"
+                  aria-label={`Remove ${file.name}`}
+                >
+                  <XCircle size={14} />
+                </button>
+              </Badge>
+            ))}
+          </div>
+        )}
         <div className="flex items-center space-x-2">
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                {/* Attach button disabled */}
-                <Button variant="ghost" size="icon" className="text-muted-foreground" disabled> 
+                <Button variant="ghost" size="icon" className="text-muted-foreground" onClick={handleFileAttach} disabled={isProcessing || attachedFilesInfo.length >= MAX_FILES_COUNT}> 
                   <Paperclip className="h-5 w-5" />
                   <span className="sr-only">Attach file(s)</span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>File attachment is temporarily disabled.</p>
+                <p>{attachedFilesInfo.length >= MAX_FILES_COUNT ? `Max ${MAX_FILES_COUNT} files allowed` : `Attach files (${SUPPORTED_FILE_EXTENSIONS})`}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
           <input 
             type="file" 
             ref={fileInputRef} 
-            // onChange={handleFileChange} // onChange handler removed/commented
+            onChange={handleFileChange}
             className="hidden" 
-            // accept={SUPPORTED_FILE_EXTENSIONS} // accept attribute removed/commented
-            multiple // multiple attribute removed/commented
-            disabled // disabled attribute added
+            accept={SUPPORTED_FILE_EXTENSIONS}
+            multiple
+            disabled={isProcessing || attachedFilesInfo.length >= MAX_FILES_COUNT}
           />
           <Input
             ref={inputRef}
@@ -243,8 +312,7 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
             disabled={isProcessing}
             className="flex-grow"
           />
-          {/* Send button disabled if no text input */}
-          <Button onClick={handleSendMessage} disabled={isProcessing || !inputValue.trim()} size="icon">
+          <Button onClick={handleSendMessage} disabled={isProcessing || (!inputValue.trim() && attachedFilesInfo.length === 0)} size="icon">
             <Send className="h-5 w-5" />
             <span className="sr-only">Send message</span>
           </Button>
@@ -253,3 +321,4 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
     </div>
   );
 }
+

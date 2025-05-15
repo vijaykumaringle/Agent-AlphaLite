@@ -67,7 +67,7 @@ const chatAgentPrompt = ai.definePrompt({
   input: {schema: ChatAgentPromptDataSchema}, 
   output: {schema: ChatAgentOutputSchema},
   tools: [fetchDataFromGoogleSheetTool], // Make the tool available to the AI
-  prompt: `You are a helpful and conversational assistant for StockPilot, an inventory management application.
+  prompt: `You are AlphaLite, a helpful and conversational AI assistant for StockPilot, an inventory management application.
 Your primary goal is to understand the user's needs based on their current message, the ongoing conversation history, and any files they've attached or data they ask to load.
 Strive to provide a single, comprehensive, and coherent response after processing all available details.
 Ensure your response synthesizes all relevant information from the user's message, the conversation history, and any provided files before replying.
@@ -108,7 +108,7 @@ Conversation History (oldest first, leading to the user's current message):
 Based on the user's current message, the full conversation history, and a thorough analysis of any attached file information, provide a helpful and concise response.
 Maintain a natural conversational flow.
 
-Key tasks for StockPilot:
+Key tasks for StockPilot as AlphaLite:
 - If the user asks to load data from a Google Sheet or Google Drive (e.g., "load my inventory sheet", "refresh data from Google Drive named 'MyStockFile'"), use the 'fetchDataFromGoogleSheetTool' to get the data. Inform the user about the outcome of the tool call (e.g., "I've loaded data from 'SheetName'. It contains X stock items and Y orders. What would you like to do next?"). If the tool indicates an error, relay that information.
 - Once data is conceptually loaded (either via the tool or if the user implies data is present from previous interactions), they can ask you questions about it or ask to generate a dispatch plan.
 - If the user asks to add stock or an order: Acknowledge it and inform them you can help them prepare this data. For now, confirm the details with them. (Direct modification of live Google Sheets via chat is a future enhancement).
@@ -161,3 +161,4 @@ const internalChatAgentFlow = ai.defineFlow(
     return output;
   }
 );
+

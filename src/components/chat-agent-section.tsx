@@ -4,11 +4,11 @@
 import type { ChatMessage } from "@/lib/types";
 import { runChatAgentFlow } from "@/lib/actions";
 import { useState, useRef, useEffect } from "react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Paperclip, Send, User, Brain } from "lucide-react";
+import { Paperclip, Send, User, Brain, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
@@ -17,6 +17,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Badge } from "@/components/ui/badge";
 
 interface ChatAgentSectionProps {
   messages: ChatMessage[];
@@ -25,14 +26,19 @@ interface ChatAgentSectionProps {
   setIsProcessing: (isProcessing: boolean) => void;
 }
 
+const SUPPORTED_FILE_TYPES = ['text/plain', 'text/csv', 'text/markdown'];
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+
 export function ChatAgentSection({ messages, setMessages, isProcessing, setIsProcessing }: ChatAgentSectionProps) {
   const [inputValue, setInputValue] = useState("");
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [attachedFileContent, setAttachedFileContent] = useState<string | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   useEffect(() => {
-    // Scroll to bottom when messages change
     if (scrollAreaRef.current) {
       const viewport = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]');
       if (viewport) {
@@ -42,29 +48,100 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
   }, [messages]);
 
   useEffect(() => {
-    // Focus input when tab is active and not processing
     if (!isProcessing && inputRef.current) {
       inputRef.current.focus();
     }
   }, [isProcessing]);
 
+  const handleFileAttach = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (file.size > MAX_FILE_SIZE) {
+        toast({
+          title: "File too large",
+          description: `Please select a file smaller than ${MAX_FILE_SIZE / (1024*1024)}MB.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!SUPPORTED_FILE_TYPES.includes(file.type)) {
+         toast({
+          title: "Unsupported file type",
+          description: `Please select a text-based file (e.g., .txt, .csv, .md). Received: ${file.type}`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setAttachedFile(file);
+        setAttachedFileContent(e.target?.result as string);
+        toast({
+          title: "File attached",
+          description: `${file.name} is ready to be sent with your message.`,
+        });
+      };
+      reader.onerror = () => {
+        toast({
+          title: "Error reading file",
+          description: "Could not read the selected file.",
+          variant: "destructive",
+        });
+      };
+      reader.readAsText(file);
+    }
+    // Reset file input value to allow selecting the same file again
+    if(event.target) {
+      event.target.value = "";
+    }
+  };
+
+  const removeAttachedFile = () => {
+    setAttachedFile(null);
+    setAttachedFileContent(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+     toast({
+      title: "File removed",
+      description: "The attachment has been cleared.",
+    });
+  };
 
   const handleSendMessage = async () => {
     const trimmedInput = inputValue.trim();
-    if (!trimmedInput) return;
+    if (!trimmedInput && !attachedFile) return;
+
+    const userMessageText = attachedFile 
+      ? `${trimmedInput} (Attachment: ${attachedFile.name})` 
+      : trimmedInput;
 
     const newUserMessage: ChatMessage = {
       id: Date.now().toString() + '-user',
       sender: "user",
-      text: trimmedInput,
+      text: userMessageText || `Sent attachment: ${attachedFile?.name}`,
       timestamp: new Date(),
     };
     setMessages((prev) => [...prev, newUserMessage]);
     setInputValue("");
     setIsProcessing(true);
 
+    const filePayload = attachedFile && attachedFileContent 
+      ? { fileName: attachedFile.name, fileContent: attachedFileContent }
+      : {};
+
     try {
-      const result = await runChatAgentFlow({ message: trimmedInput, history: messages });
+      const result = await runChatAgentFlow({ 
+        message: trimmedInput, 
+        history: messages,
+        ...filePayload
+      });
+
       if ("error" in result) {
         toast({
           title: "Chat Error",
@@ -84,8 +161,6 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
           sender: "agent",
           text: result.reply,
           timestamp: new Date(),
-          // Optionally add structured data if the flow returns it
-          // data: result.data 
         };
         setMessages((prev) => [...prev, agentResponseMessage]);
       }
@@ -105,6 +180,7 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
         setMessages((prev) => [...prev, agentErrorMessage]);
     } finally {
       setIsProcessing(false);
+      removeAttachedFile(); // Clear file after sending
       inputRef.current?.focus();
     }
   };
@@ -156,37 +232,52 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
           </div>
         )}
       </ScrollArea>
-      <div className="p-4 border-t flex items-center space-x-2 bg-background rounded-b-lg">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              {/* Button is wrapped in a span for Tooltip compatibility when disabled */}
-              <span> 
-                <Button variant="ghost" size="icon" className="text-muted-foreground" disabled>
+      <div className="p-4 border-t bg-background rounded-b-lg">
+        {attachedFile && (
+          <div className="mb-2 flex items-center justify-between p-2 bg-muted/50 rounded-md text-sm">
+            <span className="truncate">Attached: <Badge variant="secondary">{attachedFile.name}</Badge></span>
+            <Button variant="ghost" size="icon" onClick={removeAttachedFile} className="h-6 w-6 text-muted-foreground hover:text-destructive">
+              <XCircle size={16} />
+              <span className="sr-only">Remove attachment</span>
+            </Button>
+          </div>
+        )}
+        <div className="flex items-center space-x-2">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="text-muted-foreground" onClick={handleFileAttach} disabled={isProcessing}>
                   <Paperclip className="h-5 w-5" />
                   <span className="sr-only">Attach file</span>
                 </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>File attachment coming soon!</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-        <Input
-          ref={inputRef}
-          type="text"
-          placeholder="Type your message..."
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          onKeyPress={(e) => e.key === "Enter" && !isProcessing && handleSendMessage()}
-          disabled={isProcessing}
-          className="flex-grow"
-        />
-        <Button onClick={handleSendMessage} disabled={isProcessing || !inputValue.trim()} size="icon">
-          <Send className="h-5 w-5" />
-          <span className="sr-only">Send message</span>
-        </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Attach a text file (txt, csv, md)</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileChange} 
+            className="hidden" 
+            accept={SUPPORTED_FILE_TYPES.join(',')}
+          />
+          <Input
+            ref={inputRef}
+            type="text"
+            placeholder="Type your message..."
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyPress={(e) => e.key === "Enter" && !isProcessing && handleSendMessage()}
+            disabled={isProcessing}
+            className="flex-grow"
+          />
+          <Button onClick={handleSendMessage} disabled={isProcessing || (!inputValue.trim() && !attachedFile)} size="icon">
+            <Send className="h-5 w-5" />
+            <span className="sr-only">Send message</span>
+          </Button>
+        </div>
       </div>
     </div>
   );

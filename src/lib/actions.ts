@@ -2,9 +2,9 @@
 "use server";
 
 import { generateDispatchPlan } from "@/ai/flows/generate-dispatch-plan";
-import { chatAgentFlow } from "@/ai/flows/chatAgentFlow"; // Added
-import type { AIStockItem, AIOrderItem, DispatchPlanResult, ChatMessage } from "./types"; // Added ChatMessage
-import type { ChatAgentInput, ChatAgentOutput } from "@/ai/flows/chatAgentFlow"; // Added
+import { chatAgentFlow } from "@/ai/flows/chatAgentFlow";
+import type { AIStockItem, AIOrderItem, DispatchPlanResult, ChatMessage } from "./types";
+import type { ChatAgentInput, ChatAgentOutput } from "@/ai/flows/chatAgentFlow";
 
 interface GeneratePlanParams {
   stockData: AIStockItem[];
@@ -26,26 +26,33 @@ export async function runGenerateDispatchPlan(
   }
 }
 
-// Added for Chat Agent
 interface ChatAgentParams {
   message: string;
-  history?: ChatMessage[]; // Assuming ChatMessage type is defined in ./types
+  history?: ChatMessage[];
+  fileName?: string;
+  fileContent?: string;
 }
 
 export async function runChatAgentFlow(
   params: ChatAgentParams
 ): Promise<ChatAgentOutput | { error: string }> {
   try {
-    // Transform ChatMessage timestamps to string if necessary for the AI flow
     const historyForAI: ChatAgentInput['history'] = params.history?.map(msg => ({
       ...msg,
       timestamp: msg.timestamp.toISOString(),
     }));
 
-    const result = await chatAgentFlow({
+    const inputForAI: ChatAgentInput = {
       message: params.message,
       history: historyForAI,
-    });
+    };
+
+    if (params.fileName && params.fileContent) {
+      inputForAI.fileName = params.fileName;
+      inputForAI.fileContent = params.fileContent;
+    }
+
+    const result = await chatAgentFlow(inputForAI);
     return result;
   } catch (error) {
     console.error("Error in chat agent flow:", error);

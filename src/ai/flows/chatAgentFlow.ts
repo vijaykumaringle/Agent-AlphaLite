@@ -1,3 +1,4 @@
+
 // src/ai/flows/chatAgentFlow.ts
 'use server';
 /**
@@ -93,10 +94,13 @@ const internalChatAgentFlow = ai.defineFlow(
     outputSchema: ChatAgentOutputSchema,
   },
   async (input) => {
-    // Register Handlebars helper for @indexPlus1
+    // Register Handlebars helpers
     const handlebars = (await import('handlebars')).default;
     handlebars.registerHelper('indexPlus1', function(index) {
       return index + 1;
+    });
+    handlebars.registerHelper('eq', function (a, b) {
+      return a === b;
     });
     
     const { output } = await chatAgentPrompt(input);
@@ -106,3 +110,4 @@ const internalChatAgentFlow = ai.defineFlow(
     return output;
   }
 );
+

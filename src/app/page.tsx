@@ -80,8 +80,9 @@ export default function Home() {
       </main>
       <footer className="py-4 px-4 md:px-6 border-t text-center text-sm text-muted-foreground">
         © {new Date().getFullYear()} AlphaLite. All rights reserved.
+        <br />
+        Developed by Vijaykumar Ingle
       </footer>
     </div>
   );
 }
-

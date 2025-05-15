@@ -1,5 +1,5 @@
-import type { z } from 'zod';
-import type { GenerateDispatchPlanInput, GenerateDispatchPlanOutput, summarizeInventory } from '@/ai/flows/generate-dispatch-plan';
+import { z } from 'zod';
+import type { GenerateDispatchPlanInput, GenerateDispatchPlanOutput } from '@/ai/flows/generate-dispatch-plan';
 import type { SummarizeInventoryOutput as AISummarizeInventoryOutput } from '@/ai/flows/summarize-inventory';
 
 
@@ -60,4 +60,3 @@ export interface AIOrderItem {
 }
 
 export type SummarizeInventoryOutput = AISummarizeInventoryOutput;
-

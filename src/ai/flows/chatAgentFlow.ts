@@ -11,34 +11,50 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit'; // Using genkit's z (which is re-exported Zod)
-import handlebars from 'handlebars'; // Direct import for helper registration
+// handlebars import and helper registrations are removed as they are no longer needed.
 
-// Register Handlebars helpers at module level
-handlebars.registerHelper('indexPlus1', function(index) {
-  return index + 1;
-});
-handlebars.registerHelper('eq', function (a, b) {
-  return a === b;
-});
-
-const ChatMessageSchema = z.object({
+const OriginalChatMessageSchema = z.object({ // Original schema for flow input
   sender: z.enum(['user', 'agent']),
   text: z.string(),
   timestamp: z.string().datetime().describe("Timestamp of the message in ISO format"),
 });
 
-const AttachedFileSchema = z.object({
+const OriginalAttachedFileSchema = z.object({ // Original schema for flow input
   fileName: z.string().describe('The name of the file attached by the user.'),
   fileContent: z.string().optional().describe('The text content of the attached file (for text, csv, md, or simple text from Excel).'),
   fileDataUri: z.string().optional().describe("The Data URI of the attached image file (for png, jpeg). Expected format: 'data:<mimetype>;base64,<encoded_data>'."),
 });
 
+// Input schema for the exported chatAgentFlow function and internal Genkit flow
 const ChatAgentInputSchema = z.object({
   message: z.string().describe('The latest message from the user.'),
-  history: z.array(ChatMessageSchema).optional().describe('The conversation history up to this point.'),
-  files: z.array(AttachedFileSchema).optional().describe('An array of files attached by the user, if any. Currently, file attachments are disabled in the UI, so this will likely be empty or undefined.'),
+  history: z.array(OriginalChatMessageSchema).optional().describe('The conversation history up to this point.'),
+  files: z.array(OriginalAttachedFileSchema).optional().describe('An array of files attached by the user, if any. Currently, file attachments are disabled in the UI, so this will likely be empty or undefined.'),
 });
 export type ChatAgentInput = z.infer<typeof ChatAgentInputSchema>;
+
+// Schema for data transformed and passed directly to the prompt
+const PromptHistoryItemSchema = z.object({
+  text: z.string(),
+  isUser: z.boolean(),
+  // timestamp is not used in the prompt template directly
+});
+
+const PromptFileItemSchema = z.object({
+  fileName: z.string(),
+  fileContent: z.string().optional(),
+  fileDataUri: z.string().optional(),
+  displayIndex: z.number(), // 1-based index for display
+});
+
+const ChatAgentPromptDataSchema = z.object({
+  message: z.string(),
+  history: z.array(PromptHistoryItemSchema).optional(),
+  files: z.array(PromptFileItemSchema).optional(),
+});
+// Type for the data format expected by the prompt
+type ChatAgentPromptData = z.infer<typeof ChatAgentPromptDataSchema>;
+
 
 const ChatAgentOutputSchema = z.object({
   reply: z.string().describe("The agent's response to the user's message."),
@@ -53,7 +69,7 @@ export async function chatAgentFlow(input: ChatAgentInput): Promise<ChatAgentOut
 
 const chatAgentPrompt = ai.definePrompt({
   name: 'chatAgentPrompt',
-  input: {schema: ChatAgentInputSchema},
+  input: {schema: ChatAgentPromptDataSchema}, // Uses the transformed data schema
   output: {schema: ChatAgentOutputSchema},
   prompt: `You are a helpful assistant for StockPilot, an inventory management application.
 The user's latest message is: "{{message}}".
@@ -61,14 +77,14 @@ The user's latest message is: "{{message}}".
 {{#if history}}
 Conversation History (most recent last):
 {{#each history}}
-{{#if (eq sender "user")}}User{{else}}Agent{{/if}}: {{text}}
+{{#if isUser}}User{{else}}Agent{{/if}}: {{text}}
 {{/each}}
 {{/if}}
 
 {{#if files.length}}
 The user attached the following files (Note: File attachment is currently disabled in the UI, but handling logic is present):
 {{#each files}}
-File ({{@indexPlus1}}/{{../files.length}}): "{{this.fileName}}"
+File ({{displayIndex}}/{{../files.length}}): "{{this.fileName}}"
   {{#if this.fileDataUri}}
   This file is an image. Acknowledge that an image was attached. You cannot display or directly analyze the image content in this chat yet.
   {{else if this.fileContent}}
@@ -99,11 +115,31 @@ Keep responses concise.
 const internalChatAgentFlow = ai.defineFlow(
   {
     name: 'internalChatAgentFlow',
-    inputSchema: ChatAgentInputSchema,
+    inputSchema: ChatAgentInputSchema, // Accepts the original input schema
     outputSchema: ChatAgentOutputSchema,
   },
-  async (input) => {
-    const { output } = await chatAgentPrompt(input);
+  async (input: ChatAgentInput): Promise<ChatAgentOutput> => {
+    // Transform data for the prompt
+    const transformedHistory = input.history?.map(msg => ({
+      text: msg.text,
+      isUser: msg.sender === 'user',
+    }));
+
+    const transformedFiles = input.files?.map((file, index) => ({
+      fileName: file.fileName,
+      fileContent: file.fileContent,
+      fileDataUri: file.fileDataUri,
+      displayIndex: index + 1, // Create 1-based index
+    }));
+
+    const promptData: ChatAgentPromptData = {
+      message: input.message,
+      history: transformedHistory,
+      files: transformedFiles,
+    };
+
+    const { output } = await chatAgentPrompt(promptData);
+
     if (!output || typeof output.reply !== 'string') {
       console.error("AI model did not return the expected output structure for chatAgentFlow. Output:", JSON.stringify(output));
       return { reply: "I'm sorry, I couldn't generate a response at this moment. The AI model's output was not in the expected format." };
@@ -111,4 +147,3 @@ const internalChatAgentFlow = ai.defineFlow(
     return output;
   }
 );
-

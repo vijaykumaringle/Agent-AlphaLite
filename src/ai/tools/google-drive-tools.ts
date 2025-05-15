@@ -48,7 +48,7 @@ export type FetchDataFromGoogleSheetOutput = z.infer<typeof FetchDataFromGoogleS
 export const fetchDataFromGoogleSheetTool = ai.defineTool(
   {
     name: 'fetchDataFromGoogleSheetTool',
-    description: 'Fetches stock and order data from a specified Google Sheet. This tool is used when the user wants to load or refresh data from their inventory spreadsheet on Google Drive.',
+    description: 'Fetches stock and order data from a specified Google Sheet. This tool is used when the user wants to load or refresh data from their inventory spreadsheet on Google Drive. Requires configuration of Google API credentials.',
     inputSchema: FetchDataFromGoogleSheetInputSchema,
     outputSchema: FetchDataFromGoogleSheetOutputSchema,
   },
@@ -67,31 +67,106 @@ export const fetchDataFromGoogleSheetTool = ai.defineTool(
     // For now, this tool returns mock data.
     //
 
+    // 1. Authenticate with Google APIs (OAuth 2.0).
+    //    This typically involves setting up credentials (e.g., service account or OAuth client)
+    //    and obtaining an access token. The implementation details depend on your
+    //    environment (e.g., server-side with Node.js, client-side in a browser).
+    //    Make sure you have installed the googleapis library: npm install googleapis
+    //    Placeholder for authentication logic:
+       try {
+         // Replace with your actual authentication configuration
+         // e.g., keyFile: '/path/to/your/credentials.json', scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
+         const auth = new google.auth.GoogleAuth({});
+         const authClient = await auth.getClient();
+         google.options({auth: authClient});
+       } catch (error) {
+         console.error("Authentication failed:", error);
+         return { stockData: [], ordersData: [], message: `Error: Authentication failed.` };
+       }
+   
     console.log(`Conceptual fetch from Google Sheet: ${input.fileName}`);
     console.log(`Stock sheet: ${input.sheetNameStock || 'Stock'}, Orders sheet: ${input.sheetNameOrders || 'Orders'}`);
 
-    // Example Mock Data
-    const mockStockData = [
-      { PRODUCT: 'AAC Block', SIZE: '600x200x100', Quantity: 100, CBM: 1.2, 'MOTOR BAG': 'Yes' },
-      { PRODUCT: 'AAC Block', SIZE: '600x200x150', Quantity: 50, CBM: 0.9, 'MOTOR BAG': 'Yes' },
-    ];
-    const mockOrdersData = [
-      { 'SR NO': 1, DATE: '2024-07-20', CUSTOMER: 'Mock Customer A', SIZE: '600x200x100', QNTY: 10, CBM: 0.12, notes: 'Mock order 1' },
-      { 'SR NO': 2, DATE: '2024-07-21', CUSTOMER: 'Mock Customer B', SIZE: '600x200x150', QNTY: 5, CBM: 0.09, notes: 'Mock order 2' },
-    ];
-    
-    // Simulate a successful fetch
-    return {
-      stockData: mockStockData,
-      ordersData: mockOrdersData,
-      message: `Successfully fetched mock data for stock (${mockStockData.length} items) and orders (${mockOrdersData.length} items) from '${input.fileName}'. In a real scenario, this would be live data.`,
-    };
+    const stockSheetName = input.sheetNameStock || 'Stock';
+    const ordersSheetName = input.sheetNameOrders || 'Orders';
 
-    // Example of how you might return an error if the fetch failed:
-    // return {
-    //   stockData: [],
-    //   ordersData: [],
-    //   message: `Error: Could not fetch data from '${input.fileName}'. File not found or permission denied. (This is a mock error).`,
-    // };
+    // 2. Use the Google Sheets API (or Google Drive API + an Excel parsing library).
+    //    Fetch data from the specified file (input.fileName) and sheets (stockSheetName, ordersSheetName).
+    //    You would typically use the `google.sheets.spreadsheets.values.get` method.
+    let stockValues: any[][] | null | undefined;
+    let ordersValues: any[][] | null | undefined;
+       try {
+         const sheets = google.sheets({version: 'v4'});
+         const stockResponse = await sheets.spreadsheets.values.get({
+           spreadsheetId: input.fileName, // Assuming fileName is the spreadsheet ID or name
+           range: `${stockSheetName}!A:Z`, // Adjust range as needed based on your sheet structure
+         });
+         const ordersResponse = await sheets.spreadsheets.values.get({
+           spreadsheetId: input.fileName,
+           range: `${ordersSheetName}!A:Z`, // Adjust range as needed
+         });
+         stockValues = stockResponse.data.values;
+         ordersValues = ordersResponse.data.values;
+       } catch (error) {
+         console.error("Error fetching data from Google Sheets:", error);
+         return { stockData: [], ordersData: [], message: `Error fetching data from '${input.fileName}'.` };
+       }
+    // 3. Parse the data into the StockItemSchema and OrderItemSchema structures.
+    //    This involves iterating through the rows of the fetched data, mapping
+    //    column data to the schema properties, and performing type conversions
+    //    (e.g., strings to numbers).
+    //    Placeholder for parsing logic:
+       const parsedStockData: z.infer<typeof StockItemSchema>[] = [];
+       if (stockValues && stockValues.length > 1) { // Assuming header row
+         const header = stockValues[0];
+         for (let i = 1; i < stockValues.length; i++) {
+           const row = stockValues[i];
+           const stockItem: any = {};
+           header.forEach((col: string, index: number) => {
+              // Map column data to schema properties and convert types
+              // You will need to adjust this mapping and type conversion
+              // based on the actual structure of your Google Sheet columns
+              stockItem[col] = row[index]; // Basic mapping, needs type conversion
+           });
+           try {
+              // Validate the parsed data against the schema
+              parsedStockData.push(StockItemSchema.parse(stockItem));
+           } catch (e) {
+              console.error(`Error parsing stock row ${i+1}:`, e);
+              // Handle parsing errors - skip row, log warning, etc.
+           }
+         }
+       }
+       const parsedOrdersData: z.infer<typeof OrderItemSchema>[] = [];
+       if (ordersValues && ordersValues.length > 1) { // Assuming header row
+         const header = ordersValues[0];
+         for (let i = 1; i < ordersValues.length; i++) {
+           const row = ordersValues[i];
+           const orderItem: any = {};
+           header.forEach((col: string, index: number) => {
+              // Map column data to schema properties and convert types
+              orderItem[col] = row[index]; // Basic mapping, needs type conversion
+           });
+           try {
+              parsedOrdersData.push(OrderItemSchema.parse(orderItem)); // Validate with Zod
+           } catch (e) {
+              console.error(`Error parsing order row ${i+1}:`, e);
+              // Handle parsing errors
+           }
+         }
+       }
+
+    // 5. Handle errors robustly (file not found, sheet not found, incorrect format, API errors).
+    //    Error handling should be integrated throughout steps 1-4.
+
+    // For demonstration, returning mock data and a success message
+    const mockStockData: z.infer<typeof StockItemSchema>[] = [{ PRODUCT: 'Mock AAC Block', SIZE: '600x200x100', Quantity: 99, CBM: 1.2, 'MOTOR BAG': 'Yes' }];
+    const mockOrdersData: z.infer<typeof OrderItemSchema>[] = [{ 'SR NO': 99, DATE: '2024-07-25', CUSTOMER: 'Mock Customer Z', SIZE: '600x200x100', QNTY: 9, CBM: 0.12, notes: 'Mock order Z' }];
+
+    return {
+      stockData: mockStockData, // Replace with parsedStockData
+      ordersData: mockOrdersData, // Replace with parsedOrdersData
+      message: `Successfully (conceptually) fetched data for stock (${mockStockData.length} items) and orders (${mockOrdersData.length} items) from '${input.fileName}'. Full implementation for Google Sheet integration is required.`,
+    };
   }
 );

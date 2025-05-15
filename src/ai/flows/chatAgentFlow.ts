@@ -11,20 +11,20 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit'; // Using genkit's z (which is re-exported Zod)
+import { fetchDataFromGoogleSheetTool } from '@/ai/tools/google-drive-tools'; // Import the new tool
 
-const OriginalChatMessageSchema = z.object({ // Original schema for flow input
+const OriginalChatMessageSchema = z.object({ 
   sender: z.enum(['user', 'agent']),
   text: z.string(),
   timestamp: z.string().datetime().describe("Timestamp of the message in ISO format"),
 });
 
-const OriginalAttachedFileSchema = z.object({ // Original schema for flow input
+const OriginalAttachedFileSchema = z.object({ 
   fileName: z.string().describe('The name of the file attached by the user.'),
   fileContent: z.string().optional().describe('The text content of the attached file (for text, csv, md, or simple text from Excel).'),
   fileDataUri: z.string().optional().describe("The Data URI of the attached image file (for png, jpeg). Expected format: 'data:<mimetype>;base64,<encoded_data>'."),
 });
 
-// Input schema for the exported chatAgentFlow function and internal Genkit flow
 const ChatAgentInputSchema = z.object({
   message: z.string().describe('The latest message from the user.'),
   history: z.array(OriginalChatMessageSchema).optional().describe('The conversation history up to this point.'),
@@ -32,18 +32,16 @@ const ChatAgentInputSchema = z.object({
 });
 export type ChatAgentInput = z.infer<typeof ChatAgentInputSchema>;
 
-// Schema for data transformed and passed directly to the prompt
 const PromptHistoryItemSchema = z.object({
   text: z.string(),
   isUser: z.boolean(),
-  // timestamp is not used in the prompt template directly
 });
 
 const PromptFileItemSchema = z.object({
   fileName: z.string(),
   fileContent: z.string().optional(),
   fileDataUri: z.string().optional(),
-  displayIndex: z.number(), // 1-based index for display
+  displayIndex: z.number(), 
 });
 
 const ChatAgentPromptDataSchema = z.object({
@@ -51,7 +49,6 @@ const ChatAgentPromptDataSchema = z.object({
   history: z.array(PromptHistoryItemSchema).optional(),
   files: z.array(PromptFileItemSchema).optional(),
 });
-// Type for the data format expected by the prompt
 type ChatAgentPromptData = z.infer<typeof ChatAgentPromptDataSchema>;
 
 
@@ -61,18 +58,19 @@ const ChatAgentOutputSchema = z.object({
 export type ChatAgentOutput = z.infer<typeof ChatAgentOutputSchema>;
 
 
-// Exported function that client calls through server action
 export async function chatAgentFlow(input: ChatAgentInput): Promise<ChatAgentOutput> {
   return internalChatAgentFlow(input);
 }
 
 const chatAgentPrompt = ai.definePrompt({
   name: 'chatAgentPrompt',
-  input: {schema: ChatAgentPromptDataSchema}, // Uses the transformed data schema
+  input: {schema: ChatAgentPromptDataSchema}, 
   output: {schema: ChatAgentOutputSchema},
+  tools: [fetchDataFromGoogleSheetTool], // Make the tool available to the AI
   prompt: `You are a helpful and conversational assistant for StockPilot, an inventory management application.
-Your primary goal is to understand the user's needs based on their current message, the ongoing conversation history, and any files they've attached.
+Your primary goal is to understand the user's needs based on their current message, the ongoing conversation history, and any files they've attached or data they ask to load.
 Strive to provide a single, comprehensive, and coherent response after processing all available details.
+Ensure your response synthesizes all relevant information from the user's message, the conversation history, and any provided files before replying.
 
 The user's latest message is: "{{message}}".
 
@@ -88,7 +86,7 @@ File ({{this.displayIndex}}/{{../files.length}}): "{{this.fileName}}"
     """
     {{{this.fileContent}}}
     """
-    Attempt to analyze this text content if relevant to the user's query. Be aware that this is a simplified text version and might not capture all formatting or complex data structures. For precise Excel data processing, the 'Data Input' tab is recommended.
+    Attempt to analyze this text content if relevant to the user's query. Be aware that this is a simplified text version and might not capture all formatting or complex data structures. For precise Excel data processing, the 'Data Input' tab is recommended, or ask me to load data from a Google Sheet.
     Otherwise (if it's not an Excel file, e.g., .txt, .csv, .md), its text content is:
     """
     {{{this.fileContent}}}
@@ -108,26 +106,29 @@ Conversation History (oldest first, leading to the user's current message):
 {{/if}}
 
 Based on the user's current message, the full conversation history, and a thorough analysis of any attached file information, provide a helpful and concise response.
-Ensure your response synthesizes all relevant information before replying. Maintain a natural conversational flow.
+Maintain a natural conversational flow.
 
 Key tasks for StockPilot:
-- If the user asks to add stock or an order: Acknowledge it and inform them this feature will be available soon via chat.
-- If they ask to generate a dispatch plan: Guide them to use the "Data Input" tab for now, mentioning you'll assist with this via chat soon.
+- If the user asks to load data from a Google Sheet or Google Drive (e.g., "load my inventory sheet", "refresh data from Google Drive named 'MyStockFile'"), use the 'fetchDataFromGoogleSheetTool' to get the data. Inform the user about the outcome of the tool call (e.g., "I've loaded data from 'SheetName'. It contains X stock items and Y orders. What would you like to do next?"). If the tool indicates an error, relay that information.
+- Once data is conceptually loaded (either via the tool or if the user implies data is present from previous interactions), they can ask you questions about it or ask to generate a dispatch plan.
+- If the user asks to add stock or an order: Acknowledge it and inform them you can help them prepare this data. For now, confirm the details with them. (Direct modification of live Google Sheets via chat is a future enhancement).
+- If they ask to generate a dispatch plan:
+    - If data has been 'loaded' via the fetchDataFromGoogleSheetTool, acknowledge you can use that data. Guide them to confirm they want to proceed or allow them to specify input data via the "Data Input" tab if they prefer. For now, you will not trigger the plan directly but confirm the data source.
+    - If no data is loaded, guide them to use the "Data Input" tab or ask to load data from a Google Sheet.
 - For general queries about inventory management or StockPilot: Be a helpful assistant.
 
 Keep responses concise.
+When responding about data loaded via the tool, summarize what was loaded (e.g., number of stock items, number of orders found).
 `,
 });
 
-// Internal Genkit flow
 const internalChatAgentFlow = ai.defineFlow(
   {
     name: 'internalChatAgentFlow',
-    inputSchema: ChatAgentInputSchema, // Accepts the original input schema
+    inputSchema: ChatAgentInputSchema, 
     outputSchema: ChatAgentOutputSchema,
   },
   async (input: ChatAgentInput): Promise<ChatAgentOutput> => {
-    // Transform data for the prompt
     const transformedHistory = input.history?.map(msg => ({
       text: msg.text,
       isUser: msg.sender === 'user',
@@ -137,7 +138,7 @@ const internalChatAgentFlow = ai.defineFlow(
       fileName: file.fileName,
       fileContent: file.fileContent,
       fileDataUri: file.fileDataUri,
-      displayIndex: index + 1, // Create 1-based index
+      displayIndex: index + 1, 
     }));
 
     const promptData: ChatAgentPromptData = {
@@ -160,4 +161,3 @@ const internalChatAgentFlow = ai.defineFlow(
     return output;
   }
 );
-

@@ -11,6 +11,15 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit'; // Using genkit's z (which is re-exported Zod)
+import handlebars from 'handlebars'; // Direct import for helper registration
+
+// Register Handlebars helpers at module level
+handlebars.registerHelper('indexPlus1', function(index) {
+  return index + 1;
+});
+handlebars.registerHelper('eq', function (a, b) {
+  return a === b;
+});
 
 const ChatMessageSchema = z.object({
   sender: z.enum(['user', 'agent']),
@@ -94,14 +103,7 @@ const internalChatAgentFlow = ai.defineFlow(
     outputSchema: ChatAgentOutputSchema,
   },
   async (input) => {
-    // Register Handlebars helpers
-    const handlebars = (await import('handlebars')).default;
-    handlebars.registerHelper('indexPlus1', function(index) {
-      return index + 1;
-    });
-    handlebars.registerHelper('eq', function (a, b) {
-      return a === b;
-    });
+    // Helpers are now registered at the module level, no need to register them here.
     
     const { output } = await chatAgentPrompt(input);
     if (!output) {

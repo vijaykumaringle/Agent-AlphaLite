@@ -11,7 +11,6 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit'; // Using genkit's z (which is re-exported Zod)
-// handlebars import and helper registrations are removed as they are no longer needed.
 
 const OriginalChatMessageSchema = z.object({ // Original schema for flow input
   sender: z.enum(['user', 'agent']),
@@ -29,7 +28,7 @@ const OriginalAttachedFileSchema = z.object({ // Original schema for flow input
 const ChatAgentInputSchema = z.object({
   message: z.string().describe('The latest message from the user.'),
   history: z.array(OriginalChatMessageSchema).optional().describe('The conversation history up to this point.'),
-  files: z.array(OriginalAttachedFileSchema).optional().describe('An array of files attached by the user, if any. Currently, file attachments are disabled in the UI, so this will likely be empty or undefined.'),
+  files: z.array(OriginalAttachedFileSchema).optional().describe('An array of files attached by the user, if any.'),
 });
 export type ChatAgentInput = z.infer<typeof ChatAgentInputSchema>;
 
@@ -82,21 +81,25 @@ Conversation History (most recent last):
 {{/if}}
 
 {{#if files.length}}
-The user attached the following files (Note: File attachment is currently disabled in the UI, but handling logic is present):
+The user attached the following files. Analyze their content to help respond to the user's message:
 {{#each files}}
 File ({{displayIndex}}/{{../files.length}}): "{{this.fileName}}"
   {{#if this.fileDataUri}}
-  This file is an image. Acknowledge that an image was attached. You cannot display or directly analyze the image content in this chat yet.
+    This file is an IMAGE: {{media url=this.fileDataUri}}. Describe or analyze it if the user's query relates to an image.
   {{else if this.fileContent}}
     Consider the following instructions for "{{this.fileName}}":
-    If "{{this.fileName}}" ends with '.xls' or '.xlsx', it is an Excel file. Acknowledge it by name. Inform the user that you cannot process its content directly in this chat. Suggest they use the "Data Input" tab for structured data that might come from Excel.
-    Otherwise (if it's not an Excel file like .txt, .csv, .md), its text content is:
+    If "{{this.fileName}}" ends with '.xls' or '.xlsx', it is an Excel file. Its textual representation is:
     """
     {{{this.fileContent}}}
     """
-    Take this text content into account.
+    Attempt to analyze this text content if relevant to the user's query. Be aware that this is a simplified text version and might not capture all formatting or complex data structures. For precise Excel data processing, the 'Data Input' tab is recommended.
+    Otherwise (if it's not an Excel file, e.g., .txt, .csv, .md), its text content is:
+    """
+    {{{this.fileContent}}}
+    """
+    Use this text content to inform your response.
   {{else}}
-  This file "{{this.fileName}}" seems to be empty or of an unprocessable format for direct content review.
+    This file "{{this.fileName}}" appears to be empty or of a format whose content could not be directly extracted for analysis. Acknowledge it by name.
   {{/if}}
 {{/each}}
 {{/if}}
@@ -147,3 +150,4 @@ const internalChatAgentFlow = ai.defineFlow(
     return output;
   }
 );
+

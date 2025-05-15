@@ -26,6 +26,14 @@ interface ChatAgentSectionProps {
   setIsProcessing: (isProcessing: boolean) => void;
 }
 
+interface AttachedFileInfo {
+  id: string; // Unique ID for key prop and removal
+  name: string;
+  type: string;
+  content?: string; // For text-based files
+  dataUri?: string; // For image files
+}
+
 const SUPPORTED_FILE_TYPES = [
   'text/plain', 
   'text/csv', 
@@ -40,9 +48,7 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
 export function ChatAgentSection({ messages, setMessages, isProcessing, setIsProcessing }: ChatAgentSectionProps) {
   const [inputValue, setInputValue] = useState("");
-  const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [attachedFileContent, setAttachedFileContent] = useState<string | null>(null); // For text-based files
-  const [attachedFileDataUri, setAttachedFileDataUri] = useState<string | null>(null); // For image files
+  const [attachedFilesInfo, setAttachedFilesInfo] = useState<AttachedFileInfo[]>([]);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -68,109 +74,125 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      if (file.size > MAX_FILE_SIZE) {
-        toast({
-          title: "File too large",
-          description: `Please select a file smaller than ${MAX_FILE_SIZE / (1024*1024)}MB.`,
-          variant: "destructive",
-        });
-        return;
-      }
-      if (!SUPPORTED_FILE_TYPES.includes(file.type)) {
-         toast({
-          title: "Unsupported file type",
-          description: `Please select a supported file type (${SUPPORTED_FILE_EXTENSIONS}). Received: ${file.type || 'unknown'}`,
-          variant: "destructive",
-        });
-        return;
-      }
+    const files = event.target.files;
+    if (files && files.length > 0) {
+      const newFilesToProcess = Array.from(files);
+      let successfulUploads = 0;
 
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setAttachedFile(file);
-        if (file.type.startsWith('image/')) {
-          setAttachedFileDataUri(e.target?.result as string);
-          setAttachedFileContent(null);
-        } else {
-          setAttachedFileContent(e.target?.result as string);
-          setAttachedFileDataUri(null);
+      newFilesToProcess.forEach(file => {
+        if (file.size > MAX_FILE_SIZE) {
+          toast({
+            title: "File too large",
+            description: `${file.name} is larger than ${MAX_FILE_SIZE / (1024*1024)}MB.`,
+            variant: "destructive",
+          });
+          return; // Skip this file
         }
-        toast({
-          title: "File attached",
-          description: `${file.name} is ready to be sent with your message.`,
-        });
-      };
-      reader.onerror = () => {
-        toast({
-          title: "Error reading file",
-          description: "Could not read the selected file.",
-          variant: "destructive",
-        });
-        setAttachedFile(null);
-        setAttachedFileContent(null);
-        setAttachedFileDataUri(null);
-      };
+        if (!SUPPORTED_FILE_TYPES.includes(file.type) && !SUPPORTED_FILE_EXTENSIONS.split(',').some(ext => file.name.endsWith(ext))) {
+           toast({
+            title: "Unsupported file type",
+            description: `${file.name} has an unsupported type (${file.type || 'unknown'}). Supported: ${SUPPORTED_FILE_EXTENSIONS}`,
+            variant: "destructive",
+          });
+          return; // Skip this file
+        }
 
-      if (file.type.startsWith('image/')) {
-        reader.readAsDataURL(file);
-      } else {
-        reader.readAsText(file);
-      }
+        const reader = new FileReader();
+        const fileId = `${file.name}-${Date.now()}`;
+
+        reader.onload = (e) => {
+          const newFileInfoBase: Pick<AttachedFileInfo, 'id' | 'name' | 'type'> = {
+            id: fileId,
+            name: file.name,
+            type: file.type,
+          };
+
+          let newFileInfo: AttachedFileInfo;
+          if (file.type.startsWith('image/')) {
+            newFileInfo = { ...newFileInfoBase, dataUri: e.target?.result as string };
+          } else {
+            newFileInfo = { ...newFileInfoBase, content: e.target?.result as string };
+          }
+          
+          setAttachedFilesInfo(prev => [...prev, newFileInfo]);
+          successfulUploads++;
+          if (successfulUploads === newFilesToProcess.length) {
+             toast({
+              title: `${successfulUploads} File(s) attached`,
+              description: `Ready to be sent with your message.`,
+            });
+          } else if (newFilesToProcess.length > 1 && successfulUploads > 0 && newFilesToProcess.every((_,i) => i < successfulUploads || newFilesToProcess[i].size > MAX_FILE_SIZE || !SUPPORTED_FILE_TYPES.includes(newFilesToProcess[i].type) )) {
+             // This case might be too complex, a simpler toast might be better.
+             // For now, individual errors are shown. If all processed, a summary toast.
+          }
+        };
+        reader.onerror = () => {
+          toast({
+            title: "Error reading file",
+            description: `Could not read ${file.name}.`,
+            variant: "destructive",
+          });
+        };
+
+        if (file.type.startsWith('image/')) {
+          reader.readAsDataURL(file);
+        } else {
+          reader.readAsText(file);
+        }
+      });
     }
-    // Reset file input value to allow selecting the same file again
+    // Reset file input value to allow selecting the same file(s) again
     if(event.target) {
       event.target.value = "";
     }
   };
 
-  const removeAttachedFile = () => {
-    setAttachedFile(null);
-    setAttachedFileContent(null);
-    setAttachedFileDataUri(null);
+  const removeAttachedFile = (fileIdToRemove: string) => {
+    const removedFile = attachedFilesInfo.find(f => f.id === fileIdToRemove);
+    setAttachedFilesInfo(prev => prev.filter(f => f.id !== fileIdToRemove));
     if (fileInputRef.current) {
-      fileInputRef.current.value = "";
+      // This doesn't easily clear specific files if input still "holds" them,
+      // but user can re-select if needed. The primary effect is removing from our state.
     }
      toast({
       title: "File removed",
-      description: "The attachment has been cleared.",
+      description: `${removedFile?.name || 'Attachment'} has been cleared.`,
     });
   };
 
   const handleSendMessage = async () => {
     const trimmedInput = inputValue.trim();
-    if (!trimmedInput && !attachedFile) return;
+    if (!trimmedInput && attachedFilesInfo.length === 0) return;
 
-    const userMessageText = attachedFile 
-      ? `${trimmedInput} (Attachment: ${attachedFile.name})` 
-      : trimmedInput;
+    let userMessageText = trimmedInput;
+    if (attachedFilesInfo.length > 0) {
+      const fileNames = attachedFilesInfo.map(f => f.name).join(', ');
+      userMessageText = `${trimmedInput} (Attached: ${fileNames})`;
+    }
+    
 
     const newUserMessage: ChatMessage = {
       id: Date.now().toString() + '-user',
       sender: "user",
-      text: userMessageText || `Sent attachment: ${attachedFile?.name}`,
+      text: userMessageText || `Sent attachments: ${attachedFilesInfo.map(f => f.name).join(', ')}`,
       timestamp: new Date(),
     };
     setMessages((prev) => [...prev, newUserMessage]);
     setInputValue("");
     setIsProcessing(true);
 
-    const filePayload: { fileName?: string; fileContent?: string; fileDataUri?: string } = {};
-    if (attachedFile) {
-      filePayload.fileName = attachedFile.name;
-      if (attachedFileDataUri) {
-        filePayload.fileDataUri = attachedFileDataUri;
-      } else if (attachedFileContent) {
-        filePayload.fileContent = attachedFileContent;
-      }
-    }
+    const filesPayload = attachedFilesInfo.map(fInfo => ({
+      fileName: fInfo.name,
+      fileContent: fInfo.content,
+      fileDataUri: fInfo.dataUri,
+    }));
+
 
     try {
       const result = await runChatAgentFlow({ 
         message: trimmedInput, 
         history: messages,
-        ...filePayload
+        files: filesPayload,
       });
 
       if ("error" in result) {
@@ -211,7 +233,10 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
         setMessages((prev) => [...prev, agentErrorMessage]);
     } finally {
       setIsProcessing(false);
-      removeAttachedFile(); // Clear file after sending
+      setAttachedFilesInfo([]); // Clear all files after sending
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       inputRef.current?.focus();
     }
   };
@@ -264,13 +289,23 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
         )}
       </ScrollArea>
       <div className="p-4 border-t bg-background rounded-b-lg">
-        {attachedFile && (
-          <div className="mb-2 flex items-center justify-between p-2 bg-muted/50 rounded-md text-sm">
-            <span className="truncate">Attached: <Badge variant="secondary">{attachedFile.name}</Badge></span>
-            <Button variant="ghost" size="icon" onClick={removeAttachedFile} className="h-6 w-6 text-muted-foreground hover:text-destructive">
-              <XCircle size={16} />
-              <span className="sr-only">Remove attachment</span>
-            </Button>
+        {attachedFilesInfo.length > 0 && (
+          <div className="mb-2 space-y-1">
+            {attachedFilesInfo.map((fileInfo) => (
+              <div key={fileInfo.id} className="flex items-center justify-between p-1.5 bg-muted/50 rounded-md text-sm">
+                <Badge variant="secondary" className="truncate max-w-[calc(100%-3rem)]">{fileInfo.name}</Badge>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  onClick={() => removeAttachedFile(fileInfo.id)} 
+                  className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                  aria-label={`Remove ${fileInfo.name}`}
+                  disabled={isProcessing}
+                >
+                  <XCircle size={16} />
+                </Button>
+              </div>
+            ))}
           </div>
         )}
         <div className="flex items-center space-x-2">
@@ -279,11 +314,11 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="text-muted-foreground" onClick={handleFileAttach} disabled={isProcessing}>
                   <Paperclip className="h-5 w-5" />
-                  <span className="sr-only">Attach file</span>
+                  <span className="sr-only">Attach file(s)</span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Attach a file ({SUPPORTED_FILE_EXTENSIONS})</p>
+                <p>Attach file(s) ({SUPPORTED_FILE_EXTENSIONS})</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -293,6 +328,7 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
             onChange={handleFileChange} 
             className="hidden" 
             accept={SUPPORTED_FILE_EXTENSIONS}
+            multiple // Allow multiple file selection
           />
           <Input
             ref={inputRef}
@@ -304,7 +340,7 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
             disabled={isProcessing}
             className="flex-grow"
           />
-          <Button onClick={handleSendMessage} disabled={isProcessing || (!inputValue.trim() && !attachedFile)} size="icon">
+          <Button onClick={handleSendMessage} disabled={isProcessing || (!inputValue.trim() && attachedFilesInfo.length === 0)} size="icon">
             <Send className="h-5 w-5" />
             <span className="sr-only">Send message</span>
           </Button>

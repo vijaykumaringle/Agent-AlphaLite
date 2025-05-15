@@ -26,12 +26,16 @@ export async function runGenerateDispatchPlan(
   }
 }
 
+interface AttachedFilePayload {
+  fileName: string;
+  fileContent?: string;
+  fileDataUri?: string;
+}
+
 interface ChatAgentParams {
   message: string;
   history?: ChatMessage[];
-  fileName?: string;
-  fileContent?: string; // For text-based files
-  fileDataUri?: string; // For image files
+  files?: AttachedFilePayload[]; // Updated to handle multiple files
 }
 
 export async function runChatAgentFlow(
@@ -39,7 +43,6 @@ export async function runChatAgentFlow(
 ): Promise<ChatAgentOutput | { error: string }> {
   try {
     const historyForAI: ChatAgentInput['history'] = params.history?.map(msg => ({
-      // id: msg.id, // id not needed for AI schema
       sender: msg.sender,
       text: msg.text,
       timestamp: msg.timestamp.toISOString(),
@@ -48,16 +51,8 @@ export async function runChatAgentFlow(
     const inputForAI: ChatAgentInput = {
       message: params.message,
       history: historyForAI,
+      files: params.files // Pass the array of files
     };
-
-    if (params.fileName) {
-      inputForAI.fileName = params.fileName;
-      if (params.fileDataUri) {
-        inputForAI.fileDataUri = params.fileDataUri;
-      } else if (params.fileContent) {
-        inputForAI.fileContent = params.fileContent;
-      }
-    }
 
     const result = await chatAgentFlow(inputForAI);
     return result;

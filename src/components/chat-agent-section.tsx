@@ -1,3 +1,4 @@
+
 // src/components/chat-agent-section.tsx
 "use client";
 
@@ -8,7 +9,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Paperclip, Send, User, Brain, XCircle } from "lucide-react";
+import { Paperclip, Send, User, Brain } from "lucide-react"; // XCircle removed
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
@@ -17,7 +18,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Badge } from "@/components/ui/badge";
+// Badge and XCircle removed as file display is removed
 
 interface ChatAgentSectionProps {
   messages: ChatMessage[];
@@ -26,32 +27,34 @@ interface ChatAgentSectionProps {
   setIsProcessing: (isProcessing: boolean) => void;
 }
 
-interface AttachedFileInfo {
-  id: string; // Unique ID for key prop and removal
-  name: string;
-  type: string;
-  content?: string; // For text-based files
-  dataUri?: string; // For image files
-}
+// Interface for AttachedFileInfo can be kept for future re-enablement but is unused for now
+// interface AttachedFileInfo {
+//   id: string; 
+//   name: string;
+//   type: string;
+//   content?: string; 
+//   dataUri?: string; 
+// }
 
-const SUPPORTED_FILE_TYPES = [
-  'text/plain', 
-  'text/csv', 
-  'text/markdown',
-  'image/png',
-  'image/jpeg',
-  'application/vnd.ms-excel', // .xls
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' // .xlsx
-];
-const SUPPORTED_FILE_EXTENSIONS = '.png,.jpg,.jpeg,.xls,.xlsx,.txt,.csv,.md';
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+// Constants related to files can be kept for future re-enablement
+// const SUPPORTED_FILE_TYPES = [
+//   'text/plain', 
+//   'text/csv', 
+//   'text/markdown',
+//   'image/png',
+//   'image/jpeg',
+//   'application/vnd.ms-excel', // .xls
+//   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' // .xlsx
+// ];
+// const SUPPORTED_FILE_EXTENSIONS = '.png,.jpg,.jpeg,.xls,.xlsx,.txt,.csv,.md';
+// const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
 export function ChatAgentSection({ messages, setMessages, isProcessing, setIsProcessing }: ChatAgentSectionProps) {
   const [inputValue, setInputValue] = useState("");
-  const [attachedFilesInfo, setAttachedFilesInfo] = useState<AttachedFileInfo[]>([]);
+  // const [attachedFilesInfo, setAttachedFilesInfo] = useState<AttachedFileInfo[]>([]); // Disabled
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null); // Keep ref for potential future use
   const { toast } = useToast();
 
   useEffect(() => {
@@ -69,130 +72,45 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
     }
   }, [isProcessing]);
 
-  const handleFileAttach = () => {
-    fileInputRef.current?.click();
-  };
+  // File handling functions are commented out or simplified
+  // const handleFileAttach = () => {
+  //   fileInputRef.current?.click();
+  // };
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (files && files.length > 0) {
-      const newFilesToProcess = Array.from(files);
-      let successfulUploads = 0;
+  // const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  //  // Logic removed as attachments are disabled
+  // };
 
-      newFilesToProcess.forEach(file => {
-        if (file.size > MAX_FILE_SIZE) {
-          toast({
-            title: "File too large",
-            description: `${file.name} is larger than ${MAX_FILE_SIZE / (1024*1024)}MB.`,
-            variant: "destructive",
-          });
-          return; // Skip this file
-        }
-        if (!SUPPORTED_FILE_TYPES.includes(file.type) && !SUPPORTED_FILE_EXTENSIONS.split(',').some(ext => file.name.endsWith(ext))) {
-           toast({
-            title: "Unsupported file type",
-            description: `${file.name} has an unsupported type (${file.type || 'unknown'}). Supported: ${SUPPORTED_FILE_EXTENSIONS}`,
-            variant: "destructive",
-          });
-          return; // Skip this file
-        }
-
-        const reader = new FileReader();
-        const fileId = `${file.name}-${Date.now()}`;
-
-        reader.onload = (e) => {
-          const newFileInfoBase: Pick<AttachedFileInfo, 'id' | 'name' | 'type'> = {
-            id: fileId,
-            name: file.name,
-            type: file.type,
-          };
-
-          let newFileInfo: AttachedFileInfo;
-          if (file.type.startsWith('image/')) {
-            newFileInfo = { ...newFileInfoBase, dataUri: e.target?.result as string };
-          } else {
-            newFileInfo = { ...newFileInfoBase, content: e.target?.result as string };
-          }
-          
-          setAttachedFilesInfo(prev => [...prev, newFileInfo]);
-          successfulUploads++;
-          if (successfulUploads === newFilesToProcess.length) {
-             toast({
-              title: `${successfulUploads} File(s) attached`,
-              description: `Ready to be sent with your message.`,
-            });
-          } else if (newFilesToProcess.length > 1 && successfulUploads > 0 && newFilesToProcess.every((_,i) => i < successfulUploads || newFilesToProcess[i].size > MAX_FILE_SIZE || !SUPPORTED_FILE_TYPES.includes(newFilesToProcess[i].type) )) {
-             // This case might be too complex, a simpler toast might be better.
-             // For now, individual errors are shown. If all processed, a summary toast.
-          }
-        };
-        reader.onerror = () => {
-          toast({
-            title: "Error reading file",
-            description: `Could not read ${file.name}.`,
-            variant: "destructive",
-          });
-        };
-
-        if (file.type.startsWith('image/')) {
-          reader.readAsDataURL(file);
-        } else {
-          reader.readAsText(file);
-        }
-      });
-    }
-    // Reset file input value to allow selecting the same file(s) again
-    if(event.target) {
-      event.target.value = "";
-    }
-  };
-
-  const removeAttachedFile = (fileIdToRemove: string) => {
-    const removedFile = attachedFilesInfo.find(f => f.id === fileIdToRemove);
-    setAttachedFilesInfo(prev => prev.filter(f => f.id !== fileIdToRemove));
-    if (fileInputRef.current) {
-      // This doesn't easily clear specific files if input still "holds" them,
-      // but user can re-select if needed. The primary effect is removing from our state.
-    }
-     toast({
-      title: "File removed",
-      description: `${removedFile?.name || 'Attachment'} has been cleared.`,
-    });
-  };
+  // const removeAttachedFile = (fileIdToRemove: string) => {
+  //   // Logic removed
+  // };
 
   const handleSendMessage = async () => {
     const trimmedInput = inputValue.trim();
-    if (!trimmedInput && attachedFilesInfo.length === 0) return;
-
-    let userMessageText = trimmedInput;
-    if (attachedFilesInfo.length > 0) {
-      const fileNames = attachedFilesInfo.map(f => f.name).join(', ');
-      userMessageText = `${trimmedInput} (Attached: ${fileNames})`;
-    }
-    
+    if (!trimmedInput) return; // Only send if there's text input
 
     const newUserMessage: ChatMessage = {
       id: Date.now().toString() + '-user',
       sender: "user",
-      text: userMessageText || `Sent attachments: ${attachedFilesInfo.map(f => f.name).join(', ')}`,
+      text: trimmedInput,
       timestamp: new Date(),
     };
     setMessages((prev) => [...prev, newUserMessage]);
     setInputValue("");
     setIsProcessing(true);
 
-    const filesPayload = attachedFilesInfo.map(fInfo => ({
-      fileName: fInfo.name,
-      fileContent: fInfo.content,
-      fileDataUri: fInfo.dataUri,
-    }));
-
+    // FilesPayload is no longer created or sent
+    // const filesPayload = attachedFilesInfo.map(fInfo => ({
+    //   fileName: fInfo.name,
+    //   fileContent: fInfo.content,
+    //   fileDataUri: fInfo.dataUri,
+    // }));
 
     try {
       const result = await runChatAgentFlow({ 
         message: trimmedInput, 
         history: messages,
-        files: filesPayload,
+        // files: filesPayload, // Files parameter removed
       });
 
       if ("error" in result) {
@@ -233,9 +151,9 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
         setMessages((prev) => [...prev, agentErrorMessage]);
     } finally {
       setIsProcessing(false);
-      setAttachedFilesInfo([]); // Clear all files after sending
+      // setAttachedFilesInfo([]); // No longer needed as it's empty
       if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+        fileInputRef.current.value = ""; // Clear file input in case it was somehow used
       }
       inputRef.current?.focus();
     }
@@ -289,46 +207,31 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
         )}
       </ScrollArea>
       <div className="p-4 border-t bg-background rounded-b-lg">
-        {attachedFilesInfo.length > 0 && (
-          <div className="mb-2 space-y-1">
-            {attachedFilesInfo.map((fileInfo) => (
-              <div key={fileInfo.id} className="flex items-center justify-between p-1.5 bg-muted/50 rounded-md text-sm">
-                <Badge variant="secondary" className="truncate max-w-[calc(100%-3rem)]">{fileInfo.name}</Badge>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  onClick={() => removeAttachedFile(fileInfo.id)} 
-                  className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                  aria-label={`Remove ${fileInfo.name}`}
-                  disabled={isProcessing}
-                >
-                  <XCircle size={16} />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Attached files display removed */}
+        {/* {attachedFilesInfo.length > 0 && ( ... )} */}
         <div className="flex items-center space-x-2">
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="text-muted-foreground" onClick={handleFileAttach} disabled={isProcessing}>
+                {/* Attach button disabled */}
+                <Button variant="ghost" size="icon" className="text-muted-foreground" disabled> 
                   <Paperclip className="h-5 w-5" />
                   <span className="sr-only">Attach file(s)</span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Attach file(s) ({SUPPORTED_FILE_EXTENSIONS})</p>
+                <p>File attachment is temporarily disabled.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
           <input 
             type="file" 
             ref={fileInputRef} 
-            onChange={handleFileChange} 
+            // onChange={handleFileChange} // onChange handler removed/commented
             className="hidden" 
-            accept={SUPPORTED_FILE_EXTENSIONS}
-            multiple // Allow multiple file selection
+            // accept={SUPPORTED_FILE_EXTENSIONS} // accept attribute removed/commented
+            multiple // multiple attribute removed/commented
+            disabled // disabled attribute added
           />
           <Input
             ref={inputRef}
@@ -340,7 +243,8 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
             disabled={isProcessing}
             className="flex-grow"
           />
-          <Button onClick={handleSendMessage} disabled={isProcessing || (!inputValue.trim() && attachedFilesInfo.length === 0)} size="icon">
+          {/* Send button disabled if no text input */}
+          <Button onClick={handleSendMessage} disabled={isProcessing || !inputValue.trim()} size="icon">
             <Send className="h-5 w-5" />
             <span className="sr-only">Send message</span>
           </Button>

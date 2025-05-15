@@ -23,7 +23,7 @@ export default function Home() {
       {
         id: 'initial-greeting',
         sender: 'agent',
-        text: "Hello! I'm StockPilot's AI Agent. How can I assist you with inventory and orders today?",
+        text: "Hello! I'm AlphaLite, StockPilot's AI assistant. How can I assist you with inventory and orders today?",
         timestamp: new Date(),
       }
     ]);

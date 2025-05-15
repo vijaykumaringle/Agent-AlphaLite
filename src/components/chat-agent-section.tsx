@@ -11,6 +11,12 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Paperclip, Send, User, Brain } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface ChatAgentSectionProps {
   messages: ChatMessage[];
@@ -151,10 +157,22 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
         )}
       </ScrollArea>
       <div className="p-4 border-t flex items-center space-x-2 bg-background rounded-b-lg">
-        <Button variant="ghost" size="icon" className="text-muted-foreground">
-          <Paperclip className="h-5 w-5" />
-          <span className="sr-only">Attach file</span>
-        </Button>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              {/* Button is wrapped in a span for Tooltip compatibility when disabled */}
+              <span> 
+                <Button variant="ghost" size="icon" className="text-muted-foreground" disabled>
+                  <Paperclip className="h-5 w-5" />
+                  <span className="sr-only">Attach file</span>
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>File attachment coming soon!</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <Input
           ref={inputRef}
           type="text"

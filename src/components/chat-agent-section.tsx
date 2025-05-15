@@ -26,13 +26,23 @@ interface ChatAgentSectionProps {
   setIsProcessing: (isProcessing: boolean) => void;
 }
 
-const SUPPORTED_FILE_TYPES = ['text/plain', 'text/csv', 'text/markdown'];
+const SUPPORTED_FILE_TYPES = [
+  'text/plain', 
+  'text/csv', 
+  'text/markdown',
+  'image/png',
+  'image/jpeg',
+  'application/vnd.ms-excel', // .xls
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' // .xlsx
+];
+const SUPPORTED_FILE_EXTENSIONS = '.png,.jpg,.jpeg,.xls,.xlsx,.txt,.csv,.md';
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
 export function ChatAgentSection({ messages, setMessages, isProcessing, setIsProcessing }: ChatAgentSectionProps) {
   const [inputValue, setInputValue] = useState("");
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [attachedFileContent, setAttachedFileContent] = useState<string | null>(null);
+  const [attachedFileContent, setAttachedFileContent] = useState<string | null>(null); // For text-based files
+  const [attachedFileDataUri, setAttachedFileDataUri] = useState<string | null>(null); // For image files
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -71,7 +81,7 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
       if (!SUPPORTED_FILE_TYPES.includes(file.type)) {
          toast({
           title: "Unsupported file type",
-          description: `Please select a text-based file (e.g., .txt, .csv, .md). Received: ${file.type}`,
+          description: `Please select a supported file type (${SUPPORTED_FILE_EXTENSIONS}). Received: ${file.type || 'unknown'}`,
           variant: "destructive",
         });
         return;
@@ -80,7 +90,13 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
       const reader = new FileReader();
       reader.onload = (e) => {
         setAttachedFile(file);
-        setAttachedFileContent(e.target?.result as string);
+        if (file.type.startsWith('image/')) {
+          setAttachedFileDataUri(e.target?.result as string);
+          setAttachedFileContent(null);
+        } else {
+          setAttachedFileContent(e.target?.result as string);
+          setAttachedFileDataUri(null);
+        }
         toast({
           title: "File attached",
           description: `${file.name} is ready to be sent with your message.`,
@@ -92,8 +108,16 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
           description: "Could not read the selected file.",
           variant: "destructive",
         });
+        setAttachedFile(null);
+        setAttachedFileContent(null);
+        setAttachedFileDataUri(null);
       };
-      reader.readAsText(file);
+
+      if (file.type.startsWith('image/')) {
+        reader.readAsDataURL(file);
+      } else {
+        reader.readAsText(file);
+      }
     }
     // Reset file input value to allow selecting the same file again
     if(event.target) {
@@ -104,6 +128,7 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
   const removeAttachedFile = () => {
     setAttachedFile(null);
     setAttachedFileContent(null);
+    setAttachedFileDataUri(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -131,9 +156,15 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
     setInputValue("");
     setIsProcessing(true);
 
-    const filePayload = attachedFile && attachedFileContent 
-      ? { fileName: attachedFile.name, fileContent: attachedFileContent }
-      : {};
+    const filePayload: { fileName?: string; fileContent?: string; fileDataUri?: string } = {};
+    if (attachedFile) {
+      filePayload.fileName = attachedFile.name;
+      if (attachedFileDataUri) {
+        filePayload.fileDataUri = attachedFileDataUri;
+      } else if (attachedFileContent) {
+        filePayload.fileContent = attachedFileContent;
+      }
+    }
 
     try {
       const result = await runChatAgentFlow({ 
@@ -252,7 +283,7 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Attach a text file (txt, csv, md)</p>
+                <p>Attach a file ({SUPPORTED_FILE_EXTENSIONS})</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -261,7 +292,7 @@ export function ChatAgentSection({ messages, setMessages, isProcessing, setIsPro
             ref={fileInputRef} 
             onChange={handleFileChange} 
             className="hidden" 
-            accept={SUPPORTED_FILE_TYPES.join(',')}
+            accept={SUPPORTED_FILE_EXTENSIONS}
           />
           <Input
             ref={inputRef}

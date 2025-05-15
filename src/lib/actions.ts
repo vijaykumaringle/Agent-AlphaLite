@@ -30,7 +30,8 @@ interface ChatAgentParams {
   message: string;
   history?: ChatMessage[];
   fileName?: string;
-  fileContent?: string;
+  fileContent?: string; // For text-based files
+  fileDataUri?: string; // For image files
 }
 
 export async function runChatAgentFlow(
@@ -38,7 +39,9 @@ export async function runChatAgentFlow(
 ): Promise<ChatAgentOutput | { error: string }> {
   try {
     const historyForAI: ChatAgentInput['history'] = params.history?.map(msg => ({
-      ...msg,
+      // id: msg.id, // id not needed for AI schema
+      sender: msg.sender,
+      text: msg.text,
       timestamp: msg.timestamp.toISOString(),
     }));
 
@@ -47,9 +50,13 @@ export async function runChatAgentFlow(
       history: historyForAI,
     };
 
-    if (params.fileName && params.fileContent) {
+    if (params.fileName) {
       inputForAI.fileName = params.fileName;
-      inputForAI.fileContent = params.fileContent;
+      if (params.fileDataUri) {
+        inputForAI.fileDataUri = params.fileDataUri;
+      } else if (params.fileContent) {
+        inputForAI.fileContent = params.fileContent;
+      }
     }
 
     const result = await chatAgentFlow(inputForAI);

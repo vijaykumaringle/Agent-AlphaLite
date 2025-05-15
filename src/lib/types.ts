@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import type { GenerateDispatchPlanInput, GenerateDispatchPlanOutput } from '@/ai/flows/generate-dispatch-plan';
 import type { SummarizeInventoryOutput as AISummarizeInventoryOutput } from '@/ai/flows/summarize-inventory';
+// Import ChatAgent flow types if they are defined and exported from there
+// For now, defining ChatMessage here for simplicity
+// import type { ChatAgentInput, ChatAgentOutput } from '@/ai/flows/chatAgentFlow';
 
 
 // Re-exporting AI schema types for convenience if needed directly
@@ -60,3 +63,12 @@ export interface AIOrderItem {
 }
 
 export type SummarizeInventoryOutput = AISummarizeInventoryOutput;
+
+// Types for Chat Agent
+export interface ChatMessage {
+  id: string;
+  sender: 'user' | 'agent';
+  text: string;
+  timestamp: Date;
+  data?: any; // Optional: for structured data from agent
+}

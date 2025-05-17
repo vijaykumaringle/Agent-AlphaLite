@@ -13,13 +13,13 @@ import {ai} from '@/ai/genkit';
 import {z} from 'genkit'; // Using genkit's z (which is re-exported Zod)
 import { fetchDataFromGoogleSheetTool } from '@/ai/tools/google-drive-tools'; // Import the new tool
 
-const OriginalChatMessageSchema = z.object({ 
+const OriginalChatMessageSchema = z.object({
   sender: z.enum(['user', 'agent']),
   text: z.string(),
   timestamp: z.string().datetime().describe("Timestamp of the message in ISO format"),
 });
 
-const OriginalAttachedFileSchema = z.object({ 
+const OriginalAttachedFileSchema = z.object({
   fileName: z.string().describe('The name of the file attached by the user.'),
   fileContent: z.string().optional().describe('The text content of the attached file (for text, csv, md, or simple text from Excel).'),
   fileDataUri: z.string().optional().describe("The Data URI of the attached image file (for png, jpeg). Expected format: 'data:<mimetype>;base64,<encoded_data>'."),
@@ -41,7 +41,7 @@ const PromptFileItemSchema = z.object({
   fileName: z.string(),
   fileContent: z.string().optional(),
   fileDataUri: z.string().optional(),
-  displayIndex: z.number(), 
+  displayIndex: z.number(),
 });
 
 const ChatAgentPromptDataSchema = z.object({
@@ -64,7 +64,7 @@ export async function chatAgentFlow(input: ChatAgentInput): Promise<ChatAgentOut
 
 const chatAgentPrompt = ai.definePrompt({
   name: 'chatAgentPrompt',
-  input: {schema: ChatAgentPromptDataSchema}, 
+  input: {schema: ChatAgentPromptDataSchema},
   output: {schema: ChatAgentOutputSchema},
   tools: [fetchDataFromGoogleSheetTool], // Make the tool available to the AI
   prompt: `You are AlphaLite, a helpful and conversational AI assistant for StockPilot, an inventory management application.
@@ -125,21 +125,21 @@ When responding about data loaded via the tool, summarize what was loaded (e.g.,
 const internalChatAgentFlow = ai.defineFlow(
   {
     name: 'internalChatAgentFlow',
-    inputSchema: ChatAgentInputSchema, 
+    inputSchema: ChatAgentInputSchema,
     outputSchema: ChatAgentOutputSchema,
   },
   async (input: ChatAgentInput): Promise<ChatAgentOutput> => {
     const transformedHistory = input.history?.map(msg => ({
       text: msg.text,
       isUser: msg.sender === 'user',
-    }));
+    })) || []; // Ensure transformedHistory is an array, even if empty
 
     const transformedFiles = input.files?.map((file, index) => ({
       fileName: file.fileName,
       fileContent: file.fileContent,
       fileDataUri: file.fileDataUri,
-      displayIndex: index + 1, 
-    }));
+      displayIndex: index + 1,
+    })) || []; // Ensure transformedFiles is an array, even if empty
 
     const promptData: ChatAgentPromptData = {
       message: input.message,

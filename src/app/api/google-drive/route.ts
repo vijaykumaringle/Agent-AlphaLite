@@ -1,248 +1,133 @@
+
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { GOOGLE_SHEET_ID, DEFAULT_STOCK_SHEET, DEFAULT_ORDERS_SHEET, DEFAULT_STOCK_RANGE, DEFAULT_ORDERS_RANGE } from '@/config/google-drive-config';
+import type { AIStockItem, AIOrderItem } from '@/lib/types'; // Assuming these types are defined for AI processing
 
-export async function GET(request: Request) {
+function parseSheetData(values: any[][], type: 'stock' | 'orders'): AIStockItem[] | AIOrderItem[] {
+  if (!values || values.length < 1) { // Can be 1 if only header
+    console.warn(`No data rows found for ${type}. Values:`, values);
+    return [];
+  }
+
+  const header = values[0].map(h => h.toString().trim().toUpperCase());
+  const dataRows = values.slice(1);
+  const parsedData: any[] = [];
+
+  // Define expected headers for robust mapping
+  const stockHeadersExpected = ['PRODUCT', 'SIZE', 'QUANTITY', 'CBM', 'MOTOR BAG'];
+  const orderHeadersExpected = ['SR NO', 'DATE', 'SALES PERSON', 'CUSTOMER', 'LOCATION', 'SIZE', 'QNTY', 'CBM', 'NOTES'];
+
+  dataRows.forEach((row, rowIndex) => {
+    const item: any = {};
+    let hasEssentialData = false;
+
+    header.forEach((colName, index) => {
+      if (row[index] !== undefined && row[index] !== null) {
+        item[colName] = row[index];
+      }
+    });
+
+    try {
+      if (type === 'stock') {
+        const stockItem: Partial<AIStockItem> = {
+          PRODUCT: item['PRODUCT']?.toString().trim() || '',
+          SIZE: item['SIZE']?.toString().trim(),
+          Quantity: parseInt(item['QUANTITY'], 10),
+          CBM: parseFloat(item['CBM']),
+          'MOTOR BAG': item['MOTOR BAG']?.toString().trim() || 'No',
+        };
+        if (stockItem.SIZE && !isNaN(stockItem.Quantity) && !isNaN(stockItem.CBM)) {
+          parsedData.push(stockItem as AIStockItem);
+          hasEssentialData = true;
+        } else if (Object.keys(item).length > 0) { // If row has some data but not valid stock
+          console.warn(`Skipping invalid stock row ${rowIndex + 2}: Missing essential fields or invalid numbers. Data:`, item);
+        }
+      } else if (type === 'orders') {
+        const orderItem: Partial<AIOrderItem> = {
+          'SR NO': parseInt(item['SR NO'], 10),
+          DATE: item['DATE']?.toString().trim(), // Date parsing/validation can be added
+          'SALES PERSON': item['SALES PERSON']?.toString().trim() || '',
+          CUSTOMER: item['CUSTOMER']?.toString().trim(),
+          LOCATION: item['LOCATION']?.toString().trim() || '',
+          SIZE: item['SIZE']?.toString().trim(),
+          QNTY: parseInt(item['QNTY'], 10),
+          CBM: parseFloat(item['CBM']),
+          notes: item['NOTES']?.toString().trim() || '',
+        };
+        if (orderItem.CUSTOMER && orderItem.SIZE && !isNaN(orderItem['SR NO']) && !isNaN(orderItem.QNTY)) {
+          parsedData.push(orderItem as AIOrderItem);
+          hasEssentialData = true;
+        } else if (Object.keys(item).length > 0) { // If row has some data but not valid order
+            console.warn(`Skipping invalid order row ${rowIndex + 2}: Missing essential fields or invalid numbers. Data:`, item);
+        }
+      }
+      if (!hasEssentialData && Object.keys(item).length > 0){
+          // console.log(`Skipping empty or invalid row ${rowIndex + 2} of type ${type}. Data:`, item);
+      }
+    } catch (e) {
+      console.warn(`Error parsing row ${rowIndex + 2} for ${type}:`, e, "Row data:", item);
+    }
+  });
+
+  console.log(`Successfully parsed ${parsedData.length} ${type} items.`);
+  return parsedData;
+}
+
+
+export async function GET() {
   try {
-    // Initialize OAuth2 client
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI || !process.env.GOOGLE_REFRESH_TOKEN) {
+      throw new Error("Google API credentials or refresh token are not configured in .env.local");
+    }
+    if (GOOGLE_SHEET_ID === 'YOUR_GOOGLE_SHEET_ID_HERE') {
+        throw new Error("Please configure your GOOGLE_SHEET_ID in /src/config/google-drive-config.ts");
+    }
+
+
     const auth = new OAuth2Client({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
       redirectUri: process.env.GOOGLE_REDIRECT_URI,
     });
 
-    // Set credentials with refresh token
     auth.setCredentials({
       refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
     });
 
-    // Initialize Google Sheets API
-    const sheets = google.sheets({
-      version: 'v4',
-      auth,
-    });
-
-    // First, get all sheet names to verify they exist
-    const sheetsResponse = await sheets.spreadsheets.get({
-      spreadsheetId: GOOGLE_SHEET_ID,
-      fields: 'sheets.properties.title',
-    });
-    
-    const sheetNames = sheetsResponse.data.sheets?.map(sheet => sheet.properties?.title) || [];
-    console.log('Available sheet names:', sheetNames);
-
-    // Check if our sheets exist
-    if (!sheetNames.includes(DEFAULT_STOCK_SHEET)) {
-      throw new Error(`Sheet '${DEFAULT_STOCK_SHEET}' not found in the spreadsheet`);
-    }
-    if (!sheetNames.includes(DEFAULT_ORDERS_SHEET)) {
-      throw new Error(`Sheet '${DEFAULT_ORDERS_SHEET}' not found in the spreadsheet`);
-    }
-
-    // Log the exact request parameters
-    console.log('Fetching stock data with parameters:', {
-      spreadsheetId: GOOGLE_SHEET_ID,
-      sheetName: DEFAULT_STOCK_SHEET,
-      range: `${DEFAULT_STOCK_SHEET}!A:Z`
-    });
+    const sheets = google.sheets({ version: 'v4', auth });
 
     // Fetch stock data
-    console.log(`Fetching data from sheet: ${DEFAULT_STOCK_SHEET}`);
+    console.log(`Fetching stock data from Sheet ID: ${GOOGLE_SHEET_ID}, Sheet: ${DEFAULT_STOCK_SHEET}, Range: ${DEFAULT_STOCK_RANGE}`);
     const stockResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: GOOGLE_SHEET_ID,
       range: `${DEFAULT_STOCK_SHEET}!${DEFAULT_STOCK_RANGE}`,
     });
-
-    // Log the complete response
-    console.log('Stock response:', {
-      status: stockResponse.status,
-      headers: stockResponse.headers,
-      data: stockResponse.data
-    });
-
-    // Check for errors in the response
-    if (!stockResponse.data.values || stockResponse.data.values.length === 0) {
-      console.error('Stock data empty:', {
-        values: stockResponse.data.values,
-        response: stockResponse.data
-      });
-      throw new Error('No data returned from stock sheet');
-    } else {
-      console.log('Stock data received:', {
-        header: stockResponse.data.values[0],
-        firstRow: stockResponse.data.values[1],
-        rowCount: stockResponse.data.values.length
-      });
-    }
-    
-    // Log the complete stock response for debugging
-    console.log('Stock response:', {
-      status: stockResponse.status,
-      data: stockResponse.data,
-      values: stockResponse.data.values,
-      valuesLength: stockResponse.data.values?.length
-    });
-
-    // Log the exact request parameters
-    console.log('Fetching orders data with parameters:', {
-      spreadsheetId: GOOGLE_SHEET_ID,
-      sheetName: DEFAULT_ORDERS_SHEET,
-      range: `${DEFAULT_ORDERS_SHEET}!A:Z`
-    });
+    const stockValues = stockResponse.data.values;
+    const stockData = stockValues ? parseSheetData(stockValues, 'stock') : [];
 
     // Fetch orders data
-    console.log(`Fetching data from sheet: ${DEFAULT_ORDERS_SHEET}`);
+    console.log(`Fetching orders data from Sheet ID: ${GOOGLE_SHEET_ID}, Sheet: ${DEFAULT_ORDERS_SHEET}, Range: ${DEFAULT_ORDERS_RANGE}`);
     const ordersResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: GOOGLE_SHEET_ID,
       range: `${DEFAULT_ORDERS_SHEET}!${DEFAULT_ORDERS_RANGE}`,
     });
-
-    // Log the complete response
-    console.log('Orders response:', {
-      status: ordersResponse.status,
-      headers: ordersResponse.headers,
-      data: ordersResponse.data
-    });
-
-    // Check for errors in the response
-    if (!ordersResponse.data.values || ordersResponse.data.values.length === 0) {
-      console.error('Orders data empty:', {
-        values: ordersResponse.data.values,
-        response: ordersResponse.data
-      });
-      throw new Error('No data returned from orders sheet');
-    } else {
-      console.log('Orders data received:', {
-        header: ordersResponse.data.values[0],
-        firstRow: ordersResponse.data.values[1],
-        rowCount: ordersResponse.data.values.length
-      });
-    }
-    
-    // Log the complete orders response for debugging
-    console.log('Orders response:', {
-      status: ordersResponse.status,
-      data: ordersResponse.data,
-      values: ordersResponse.data.values,
-      valuesLength: ordersResponse.data.values?.length
-    });
-
-    // Parse stock data
-    const stockValues = stockResponse.data.values;
-    
-    // Add more detailed logging
-    if (!stockValues) {
-      console.error('No stock values returned from API');
-    } else {
-      console.log('Stock values:', {
-        count: stockValues.length,
-        header: stockValues[0],
-        firstRow: stockValues[1],
-        lastRow: stockValues[stockValues.length - 1]
-      });
-    }
-
-    const parsedStockData = stockValues && stockValues.length > 1 
-      ? parseSheetData(stockValues)
-      : [];
-
-    // Log parsed data
-    console.log('Parsed stock data:', parsedStockData);
-
-    // Parse orders data
     const ordersValues = ordersResponse.data.values;
-    const parsedOrdersData = ordersValues && ordersValues.length > 1 
-      ? parseSheetData(ordersValues)
-      : [];
+    const ordersData = ordersValues ? parseSheetData(ordersValues, 'orders') : [];
 
     return NextResponse.json({
-      stockData: parsedStockData,
-      ordersData: parsedOrdersData,
-      message: `Successfully fetched data for stock (${parsedStockData.length} items) and orders (${parsedOrdersData.length} items) from '${GOOGLE_SHEET_ID}'`
+      stockData,
+      ordersData,
+      message: `Successfully fetched ${stockData.length} stock items and ${ordersData.length} order items.`,
     });
+
   } catch (error) {
     console.error('Error fetching data from Google Sheets:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'An error occurred' },
-      { status: 500 }
-    );
+    const message = error instanceof Error ? error.message : 'An unknown error occurred while fetching data from Google Sheets.';
+    // Attempt to get more specific error from Google API if available
+    // @ts-ignore
+    const googleError = error.errors?.[0]?.message;
+    return NextResponse.json({ error: googleError || message }, { status: 500 });
   }
-}
-
-// Helper function to parse sheet data
-function parseSheetData(values: any[][]) {
-  if (!values || values.length < 2) {
-    console.warn('Invalid data: values array is empty or has less than 2 rows');
-    return [];
-  }
-
-  const header = values[0];
-  const parsedData = [];
-
-  // Log header for debugging
-  console.log('Header row:', header);
-
-  // Check if we have all required columns for stock data
-  const requiredStockColumns = ['PRODUCT', 'SIZE', 'Quantity', 'CBM', 'MOTOR BAG'];
-  const hasAllStockColumns = requiredStockColumns.every(col => header.includes(col));
-  
-  // Check if we have all required columns for orders data
-  const requiredOrdersColumns = ['SR NO', 'DATE', 'SALES PERSON', 'CUSTOMR NAME', 'LOCATION', 'SIZE', 'QNTY', 'CBM'];
-  const hasAllOrdersColumns = requiredOrdersColumns.every(col => header.includes(col));
-
-  // Log which data type we're parsing
-  if (hasAllStockColumns) {
-    console.log('Parsing stock data with columns:', requiredStockColumns);
-  } else if (hasAllOrdersColumns) {
-    console.log('Parsing orders data with columns:', requiredOrdersColumns);
-  } else {
-    console.error('Header does not match either stock or orders format:', header);
-    return [];
-  }
-
-  for (let i = 1; i < values.length; i++) {
-    const row = values[i];
-    const item: any = {};
-
-    // Map header to row values
-    header.forEach((col, index) => {
-      const value = row[index];
-      item[col] = value;
-    });
-
-    try {
-      // Validate and transform data
-      if (hasAllStockColumns) {
-        // This is stock data
-        parsedData.push({
-          PRODUCT: item.PRODUCT?.toString().trim() || '',
-          SIZE: item.SIZE?.toString().trim() || '',
-          Quantity: Number(item.Quantity) || 0,
-          CBM: Number(item.CBM) || 0,
-          'MOTOR BAG': item['MOTOR BAG']?.toString().trim() || 'No'
-        });
-      } else if (hasAllOrdersColumns) {
-        // This is orders data
-        parsedData.push({
-          'SR NO': Number(item['SR NO']) || 0,
-          DATE: item.DATE?.toString().trim() || '',
-          'SALES PERSON': item['SALES PERSON']?.toString().trim() || '',
-          'CUSTOMER NAME': item['CUSTOMR NAME']?.toString().trim() || '',
-          LOCATION: item.LOCATION?.toString().trim() || '',
-          SIZE: item.SIZE?.toString().trim() || '',
-          QNTY: Number(item.QNTY) || 0,
-          CBM: Number(item.CBM) || 0
-        });
-      }
-    } catch (e) {
-      console.warn(`Skipping row ${i + 1}: ${e instanceof Error ? e.message : 'Invalid data'}`);
-      console.log('Row data:', row);
-    }
-  }
-
-  // Log parsed data count
-  console.log(`Parsed ${parsedData.length} items`);
-  
-  return parsedData;
 }

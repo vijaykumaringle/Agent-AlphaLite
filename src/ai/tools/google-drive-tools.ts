@@ -1,19 +1,27 @@
 
 /**
- * @fileOverview Tools for interacting with Google Drive.
+ * @fileOverview Tools for interacting with Google Drive (via an internal API endpoint).
  *
- * - fetchDataFromGoogleSheetTool - A conceptual tool to fetch stock and order data from a Google Sheet.
+ * - fetchDataFromGoogleSheetTool - A tool to fetch stock and order data from a Google Sheet.
  * - FetchDataFromGoogleSheetInput - Input schema for the tool.
  * - FetchDataFromGoogleSheetOutput - Output schema for the tool.
  */
 
-import {ai} from '@/ai/genkit';
-import { z } from 'zod';
-import { google } from 'googleapis';
-import { OAuth2Client } from 'google-auth-library';
-import { GOOGLE_SHEET_ID, DEFAULT_STOCK_SHEET, DEFAULT_ORDERS_SHEET } from '@/config/google-drive-config';
+import { z } from 'zod'; // Using Zod from 'zod' directly as this is not a 'use server' file anymore.
+import type { AIStockItem, AIOrderItem } from '@/lib/types';
 
-// Define schemas similar to generateDispatchPlan for consistency
+// Define schemas for the tool's input and output.
+// These should align with what the API endpoint /api/google-drive expects/returns
+// and what the generateDispatchPlan flow requires.
+
+export const FetchDataFromGoogleSheetInputSchema = z.object({
+  fileName: z.string().describe("The name of the Google Sheet file. The system will use a pre-configured Sheet ID for now, but this field is for future extension."),
+  // Potentially add sheetNameStock, sheetNameOrders if you want the user to specify them via chat.
+  // For now, they are taken from config on the server-side.
+});
+export type FetchDataFromGoogleSheetInput = z.infer<typeof FetchDataFromGoogleSheetInputSchema>;
+
+// Define schemas for the items as they would be structured after parsing from the sheet
 const StockItemSchema = z.object({
   PRODUCT: z.string().optional(),
   SIZE: z.string(),
@@ -24,7 +32,7 @@ const StockItemSchema = z.object({
 
 const OrderItemSchema = z.object({
   'SR NO': z.number(),
-  DATE: z.string(),
+  DATE: z.string(), // Dates from sheets are often read as strings
   'SALES PERSON': z.string().optional(),
   CUSTOMER: z.string(),
   LOCATION: z.string().optional(),
@@ -34,115 +42,57 @@ const OrderItemSchema = z.object({
   notes: z.string().optional(),
 });
 
-const FetchDataFromGoogleSheetInputSchema = z.object({
-  fileName: z.string(),
-  sheetNameStock: z.string().optional(),
-  sheetNameOrders: z.string().optional(),
+export const FetchDataFromGoogleSheetOutputSchema = z.object({
+  stockData: z.array(StockItemSchema).describe("Array of stock items fetched from the Google Sheet."),
+  ordersData: z.array(OrderItemSchema).describe("Array of order items fetched from the Google Sheet."),
+  message: z.string().describe("A message summarizing the outcome of the fetch operation, e.g., number of items fetched or any issues encountered."),
 });
+export type FetchDataFromGoogleSheetOutput = z.infer<typeof FetchDataFromGoogleSheetOutputSchema>;
 
-const FetchDataFromGoogleSheetOutputSchema = z.object({
-  stockData: z.array(StockItemSchema),
-  ordersData: z.array(OrderItemSchema),
-  message: z.string(),
-});
-
-// Define types from schemas
-type FetchDataFromGoogleSheetInput = z.infer<typeof FetchDataFromGoogleSheetInputSchema>;
-type FetchDataFromGoogleSheetOutput = z.infer<typeof FetchDataFromGoogleSheetOutputSchema>;
 
 export const fetchDataFromGoogleSheetTool = {
   name: 'fetchDataFromGoogleSheetTool',
-  description: 'Fetches stock and order data from a configured Google Sheet via API',
-  input: { schema: FetchDataFromGoogleSheetInputSchema },
-  output: { schema: FetchDataFromGoogleSheetOutputSchema },
-  execute: async (input: z.infer<typeof FetchDataFromGoogleSheetInputSchema>): Promise<z.infer<typeof FetchDataFromGoogleSheetOutputSchema>> => {
+  description: 'Fetches current stock and pending order data from the primary Google Sheet. Use this when the user asks to load, refresh, or get the latest data from their inventory spreadsheet.',
+  inputSchema: FetchDataFromGoogleSheetInputSchema,
+  outputSchema: FetchDataFromGoogleSheetOutputSchema,
+  async execute(input: FetchDataFromGoogleSheetInput): Promise<FetchDataFromGoogleSheetOutput> {
+    console.log(`Tool 'fetchDataFromGoogleSheetTool' called with input:`, input);
     try {
-      const response = await fetch('/api/google-drive', {
+      // The tool now calls our internal API endpoint
+      const response = await fetch('/api/google-drive', { // Assuming Next.js app is running on the same host
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-        }
+        },
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`Failed to fetch data from Google Drive: ${errorData.error || response.statusText}`);
+        const errorData = await response.json().catch(() => ({ error: "Failed to parse error response from API" }));
+        console.error('API call failed:', response.status, errorData);
+        return {
+          stockData: [],
+          ordersData: [],
+          message: `Error fetching data from Google Drive: ${errorData.error || response.statusText}`,
+        };
       }
 
       const data = await response.json();
-      return data;
+      
+      // Ensure the data matches the expected output schema, especially the message
+      return {
+        stockData: data.stockData || [],
+        ordersData: data.ordersData || [],
+        message: data.message || `Successfully fetched data. Stock items: ${data.stockData?.length || 0}, Order items: ${data.ordersData?.length || 0}.`,
+      };
+
     } catch (error) {
-      console.error('Error fetching data from Google Drive:', error);
-      throw new Error('Failed to fetch data from Google Drive');
+      console.error('Error executing fetchDataFromGoogleSheetTool:', error);
+      const message = error instanceof Error ? error.message : 'An unknown error occurred while trying to fetch data.';
+      return {
+        stockData: [],
+        ordersData: [],
+        message: `Failed to execute tool: ${message}`,
+      };
     }
   }
 };
-
-
-// Helper function to parse sheet data
-function parseSheetData(values: any[][], schema: z.ZodObject<any>): any[] {
-  if (!values || values.length < 2) {
-    console.warn('Invalid data: values array is empty or has less than 2 rows');
-    return [];
-  }
-
-  const header = values[0];
-  const parsedData = [];
-
-  console.log('Header row:', header);
-
-  const requiredStockColumns = ['PRODUCT', 'SIZE', 'Quantity', 'CBM', 'MOTOR BAG'];
-  const hasAllStockColumns = requiredStockColumns.every(col => header.includes(col));
-  
-  const requiredOrdersColumns = ['SR NO', 'DATE', 'SALES PERSON', 'CUSTOMER', 'LOCATION', 'SIZE', 'QNTY', 'CBM'];
-  const hasAllOrdersColumns = requiredOrdersColumns.every(col => header.includes(col));
-
-  if (hasAllStockColumns) {
-    console.log('Parsing stock data with columns:', requiredStockColumns);
-  } else if (hasAllOrdersColumns) {
-    console.log('Parsing orders data with columns:', requiredOrdersColumns);
-  } else {
-    console.error('Header does not match either stock or orders format:', header);
-    return [];
-  }
-
-  for (let i = 1; i < values.length; i++) {
-    const row = values[i];
-    const item: any = {};
-
-    header.forEach((col, index) => {
-      const value = row[index];
-      item[col] = value;
-    });
-
-    try {
-      if (hasAllStockColumns) {
-        parsedData.push({
-          PRODUCT: item.PRODUCT?.toString().trim() || '',
-          SIZE: item.SIZE?.toString().trim() || '',
-          Quantity: Number(item.Quantity) || 0,
-          CBM: Number(item.CBM) || 0,
-          'MOTOR BAG': item['MOTOR BAG']?.toString().trim() || 'No'
-        });
-      } else if (hasAllOrdersColumns) {
-        parsedData.push({
-          'SR NO': Number(item['SR NO']) || 0,
-          DATE: item.DATE?.toString().trim() || '',
-          'SALES PERSON': item['SALES PERSON']?.toString().trim() || '',
-          CUSTOMER: item.CUSTOMER?.toString().trim() || '',
-          LOCATION: item.LOCATION?.toString().trim() || '',
-          SIZE: item.SIZE?.toString().trim() || '',
-          QNTY: Number(item.QNTY) || 0,
-          CBM: Number(item.CBM) || 0
-        });
-      }
-    } catch (e) {
-      console.warn(`Skipping row ${i + 1}: ${e instanceof Error ? e.message : 'Invalid data'}`);
-      console.log('Row data:', row);
-    }
-  }
-
-  console.log(`Parsed ${parsedData.length} items`);
-  
-  return parsedData;
-}
